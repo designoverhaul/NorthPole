@@ -1,0 +1,99 @@
+{
+  "" : {
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/GiftProduct-primary.dia",
+    "emit-module-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/GiftProduct-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/GiftProduct-primary-emit-module.dia",
+    "pch" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/GiftProduct-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/GiftProduct-primary.swiftdeps"
+  },
+  "/Users/aaron/Documents/GitHub/ChristmasWishlist/ChristmasWishlist/AppGroupContainer.swift" : {
+    "const-values" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/AppGroupContainer.swiftconstvalues",
+    "dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/AppGroupContainer.d",
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/AppGroupContainer.dia",
+    "index-unit-output-path" : "/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/AppGroupContainer.o",
+    "llvm-bc" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/AppGroupContainer.bc",
+    "object" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/AppGroupContainer.o",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/AppGroupContainer.swiftdeps",
+    "swiftmodule" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/AppGroupContainer~partial.swiftmodule"
+  },
+  "/Users/aaron/Documents/GitHub/ChristmasWishlist/ChristmasWishlist/CustomComponents.swift" : {
+    "const-values" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/CustomComponents.swiftconstvalues",
+    "dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/CustomComponents.d",
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/CustomComponents.dia",
+    "index-unit-output-path" : "/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/CustomComponents.o",
+    "llvm-bc" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/CustomComponents.bc",
+    "object" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/CustomComponents.o",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/CustomComponents.swiftdeps",
+    "swiftmodule" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/CustomComponents~partial.swiftmodule"
+  },
+  "/Users/aaron/Documents/GitHub/ChristmasWishlist/ChristmasWishlist/DesignSystem.swift" : {
+    "const-values" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/DesignSystem.swiftconstvalues",
+    "dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/DesignSystem.d",
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/DesignSystem.dia",
+    "index-unit-output-path" : "/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/DesignSystem.o",
+    "llvm-bc" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/DesignSystem.bc",
+    "object" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/DesignSystem.o",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/DesignSystem.swiftdeps",
+    "swiftmodule" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/DesignSystem~partial.swiftmodule"
+  },
+  "/Users/aaron/Documents/GitHub/ChristmasWishlist/ChristmasWishlist/Friend.swift" : {
+    "const-values" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/Friend.swiftconstvalues",
+    "dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/Friend.d",
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/Friend.dia",
+    "index-unit-output-path" : "/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/Friend.o",
+    "llvm-bc" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/Friend.bc",
+    "object" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/Friend.o",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/Friend.swiftdeps",
+    "swiftmodule" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/Friend~partial.swiftmodule"
+  },
+  "/Users/aaron/Documents/GitHub/ChristmasWishlist/ChristmasWishlist/HapticManager.swift" : {
+    "const-values" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/HapticManager.swiftconstvalues",
+    "dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/HapticManager.d",
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/HapticManager.dia",
+    "index-unit-output-path" : "/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/HapticManager.o",
+    "llvm-bc" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/HapticManager.bc",
+    "object" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/HapticManager.o",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/HapticManager.swiftdeps",
+    "swiftmodule" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/HapticManager~partial.swiftmodule"
+  },
+  "/Users/aaron/Documents/GitHub/ChristmasWishlist/ChristmasWishlist/User.swift" : {
+    "const-values" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/User.swiftconstvalues",
+    "dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/User.d",
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/User.dia",
+    "index-unit-output-path" : "/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/User.o",
+    "llvm-bc" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/User.bc",
+    "object" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/User.o",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/User.swiftdeps",
+    "swiftmodule" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/User~partial.swiftmodule"
+  },
+  "/Users/aaron/Documents/GitHub/ChristmasWishlist/ChristmasWishlist/WishlistItem.swift" : {
+    "const-values" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/WishlistItem.swiftconstvalues",
+    "dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/WishlistItem.d",
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/WishlistItem.dia",
+    "index-unit-output-path" : "/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/WishlistItem.o",
+    "llvm-bc" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/WishlistItem.bc",
+    "object" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/WishlistItem.o",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/WishlistItem.swiftdeps",
+    "swiftmodule" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/WishlistItem~partial.swiftmodule"
+  },
+  "/Users/aaron/Documents/GitHub/ChristmasWishlist/GiftProduct/ShareExtensionView.swift" : {
+    "const-values" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareExtensionView.swiftconstvalues",
+    "dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareExtensionView.d",
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareExtensionView.dia",
+    "index-unit-output-path" : "/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareExtensionView.o",
+    "llvm-bc" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareExtensionView.bc",
+    "object" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareExtensionView.o",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareExtensionView.swiftdeps",
+    "swiftmodule" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareExtensionView~partial.swiftmodule"
+  },
+  "/Users/aaron/Documents/GitHub/ChristmasWishlist/GiftProduct/ShareViewController.swift" : {
+    "const-values" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareViewController.swiftconstvalues",
+    "dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareViewController.d",
+    "diagnostics" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareViewController.dia",
+    "index-unit-output-path" : "/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareViewController.o",
+    "llvm-bc" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareViewController.bc",
+    "object" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareViewController.o",
+    "swift-dependencies" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareViewController.swiftdeps",
+    "swiftmodule" : "/Users/aaron/Documents/GitHub/ChristmasWishlist/build/ChristmasWishlist.build/Debug-iphoneos/GiftProduct.build/Objects-normal/arm64/ShareViewController~partial.swiftmodule"
+  }
+}

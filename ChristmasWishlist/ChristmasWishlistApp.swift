@@ -6,12 +6,20 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct ChristmasWishlistApp: App {
+    init() {
+        // Debug: Print all available fonts
+        printAllAvailableFonts()
+    }
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()
+                .preferredColorScheme(.light) // Force light mode only
         }
+        .modelContainer(AppGroupContainer.modelContainer)
     }
 }
