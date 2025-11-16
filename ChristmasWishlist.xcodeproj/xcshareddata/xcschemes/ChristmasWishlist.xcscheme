@@ -64,7 +64,8 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES">
-      <MacroExpansion>
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "9341EFD72ECA1A2800E98CEC"
@@ -72,7 +73,7 @@
             BlueprintName = "ChristmasWishlist"
             ReferencedContainer = "container:ChristmasWishlist.xcodeproj">
          </BuildableReference>
-      </MacroExpansion>
+      </BuildableProductRunnable>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

@@ -111,6 +111,13 @@ struct CloudKitWishlistView: View {
             .refreshable {
                 await loadItems()
             }
+            .onChange(of: cloudKit.isSignedInToiCloud) { _, isSignedIn in
+                if isSignedIn {
+                    Task {
+                        await loadItems()
+                    }
+                }
+            }
         }
     }
 
@@ -167,6 +174,11 @@ struct CloudKitWishlistView: View {
     }
 
     private func loadItems() async {
+        // Wait for CloudKit to sign in first
+        guard cloudKit.isSignedInToiCloud else {
+            return
+        }
+
         isLoading = true
         errorMessage = nil
 
