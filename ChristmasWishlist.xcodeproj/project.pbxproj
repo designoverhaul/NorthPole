@@ -1,0 +1,583 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		9341EFE62ECA1A2A00E98CEC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9341EFD02ECA1A2800E98CEC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9341EFD72ECA1A2800E98CEC;
+			remoteInfo = ChristmasWishlist;
+		};
+		9341EFF02ECA1A2A00E98CEC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9341EFD02ECA1A2800E98CEC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9341EFD72ECA1A2800E98CEC;
+			remoteInfo = ChristmasWishlist;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		9341EFD82ECA1A2800E98CEC /* ChristmasWishlist.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChristmasWishlist.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9341EFE52ECA1A2A00E98CEC /* ChristmasWishlistTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChristmasWishlistTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9341EFEF2ECA1A2A00E98CEC /* ChristmasWishlistUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChristmasWishlistUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		9341EFDA2ECA1A2800E98CEC /* ChristmasWishlist */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ChristmasWishlist;
+			sourceTree = "<group>";
+		};
+		9341EFE82ECA1A2A00E98CEC /* ChristmasWishlistTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ChristmasWishlistTests;
+			sourceTree = "<group>";
+		};
+		9341EFF22ECA1A2A00E98CEC /* ChristmasWishlistUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ChristmasWishlistUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9341EFD52ECA1A2800E98CEC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9341EFE22ECA1A2A00E98CEC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9341EFEC2ECA1A2A00E98CEC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		9341EFCF2ECA1A2800E98CEC = {
+			isa = PBXGroup;
+			children = (
+				9341EFDA2ECA1A2800E98CEC /* ChristmasWishlist */,
+				9341EFE82ECA1A2A00E98CEC /* ChristmasWishlistTests */,
+				9341EFF22ECA1A2A00E98CEC /* ChristmasWishlistUITests */,
+				9341EFD92ECA1A2800E98CEC /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9341EFD92ECA1A2800E98CEC /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9341EFD82ECA1A2800E98CEC /* ChristmasWishlist.app */,
+				9341EFE52ECA1A2A00E98CEC /* ChristmasWishlistTests.xctest */,
+				9341EFEF2ECA1A2A00E98CEC /* ChristmasWishlistUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9341EFD72ECA1A2800E98CEC /* ChristmasWishlist */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9341EFF92ECA1A2A00E98CEC /* Build configuration list for PBXNativeTarget "ChristmasWishlist" */;
+			buildPhases = (
+				9341EFD42ECA1A2800E98CEC /* Sources */,
+				9341EFD52ECA1A2800E98CEC /* Frameworks */,
+				9341EFD62ECA1A2800E98CEC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				9341EFDA2ECA1A2800E98CEC /* ChristmasWishlist */,
+			);
+			name = ChristmasWishlist;
+			packageProductDependencies = (
+			);
+			productName = ChristmasWishlist;
+			productReference = 9341EFD82ECA1A2800E98CEC /* ChristmasWishlist.app */;
+			productType = "com.apple.product-type.application";
+		};
+		9341EFE42ECA1A2A00E98CEC /* ChristmasWishlistTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9341EFFC2ECA1A2A00E98CEC /* Build configuration list for PBXNativeTarget "ChristmasWishlistTests" */;
+			buildPhases = (
+				9341EFE12ECA1A2A00E98CEC /* Sources */,
+				9341EFE22ECA1A2A00E98CEC /* Frameworks */,
+				9341EFE32ECA1A2A00E98CEC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9341EFE72ECA1A2A00E98CEC /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				9341EFE82ECA1A2A00E98CEC /* ChristmasWishlistTests */,
+			);
+			name = ChristmasWishlistTests;
+			packageProductDependencies = (
+			);
+			productName = ChristmasWishlistTests;
+			productReference = 9341EFE52ECA1A2A00E98CEC /* ChristmasWishlistTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		9341EFEE2ECA1A2A00E98CEC /* ChristmasWishlistUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9341EFFF2ECA1A2A00E98CEC /* Build configuration list for PBXNativeTarget "ChristmasWishlistUITests" */;
+			buildPhases = (
+				9341EFEB2ECA1A2A00E98CEC /* Sources */,
+				9341EFEC2ECA1A2A00E98CEC /* Frameworks */,
+				9341EFED2ECA1A2A00E98CEC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9341EFF12ECA1A2A00E98CEC /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				9341EFF22ECA1A2A00E98CEC /* ChristmasWishlistUITests */,
+			);
+			name = ChristmasWishlistUITests;
+			packageProductDependencies = (
+			);
+			productName = ChristmasWishlistUITests;
+			productReference = 9341EFEF2ECA1A2A00E98CEC /* ChristmasWishlistUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9341EFD02ECA1A2800E98CEC /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2610;
+				LastUpgradeCheck = 2610;
+				TargetAttributes = {
+					9341EFD72ECA1A2800E98CEC = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					9341EFE42ECA1A2A00E98CEC = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = 9341EFD72ECA1A2800E98CEC;
+					};
+					9341EFEE2ECA1A2A00E98CEC = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = 9341EFD72ECA1A2800E98CEC;
+					};
+				};
+			};
+			buildConfigurationList = 9341EFD32ECA1A2800E98CEC /* Build configuration list for PBXProject "ChristmasWishlist" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 9341EFCF2ECA1A2800E98CEC;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 9341EFD92ECA1A2800E98CEC /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9341EFD72ECA1A2800E98CEC /* ChristmasWishlist */,
+				9341EFE42ECA1A2A00E98CEC /* ChristmasWishlistTests */,
+				9341EFEE2ECA1A2A00E98CEC /* ChristmasWishlistUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		9341EFD62ECA1A2800E98CEC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9341EFE32ECA1A2A00E98CEC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9341EFED2ECA1A2A00E98CEC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		9341EFD42ECA1A2800E98CEC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9341EFE12ECA1A2A00E98CEC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9341EFEB2ECA1A2A00E98CEC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9341EFE72ECA1A2A00E98CEC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9341EFD72ECA1A2800E98CEC /* ChristmasWishlist */;
+			targetProxy = 9341EFE62ECA1A2A00E98CEC /* PBXContainerItemProxy */;
+		};
+		9341EFF12ECA1A2A00E98CEC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9341EFD72ECA1A2800E98CEC /* ChristmasWishlist */;
+			targetProxy = 9341EFF02ECA1A2A00E98CEC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		9341EFF72ECA1A2A00E98CEC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 8Z26HLRJ65;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		9341EFF82ECA1A2A00E98CEC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 8Z26HLRJ65;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		9341EFFA2ECA1A2A00E98CEC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8Z26HLRJ65;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlist;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		9341EFFB2ECA1A2A00E98CEC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8Z26HLRJ65;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlist;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9341EFFD2ECA1A2A00E98CEC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8Z26HLRJ65;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlistTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ChristmasWishlist.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ChristmasWishlist";
+			};
+			name = Debug;
+		};
+		9341EFFE2ECA1A2A00E98CEC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8Z26HLRJ65;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlistTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ChristmasWishlist.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ChristmasWishlist";
+			};
+			name = Release;
+		};
+		9341F0002ECA1A2A00E98CEC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8Z26HLRJ65;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlistUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ChristmasWishlist;
+			};
+			name = Debug;
+		};
+		9341F0012ECA1A2A00E98CEC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8Z26HLRJ65;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlistUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ChristmasWishlist;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		9341EFD32ECA1A2800E98CEC /* Build configuration list for PBXProject "ChristmasWishlist" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9341EFF72ECA1A2A00E98CEC /* Debug */,
+				9341EFF82ECA1A2A00E98CEC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9341EFF92ECA1A2A00E98CEC /* Build configuration list for PBXNativeTarget "ChristmasWishlist" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9341EFFA2ECA1A2A00E98CEC /* Debug */,
+				9341EFFB2ECA1A2A00E98CEC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9341EFFC2ECA1A2A00E98CEC /* Build configuration list for PBXNativeTarget "ChristmasWishlistTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9341EFFD2ECA1A2A00E98CEC /* Debug */,
+				9341EFFE2ECA1A2A00E98CEC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9341EFFF2ECA1A2A00E98CEC /* Build configuration list for PBXNativeTarget "ChristmasWishlistUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9341F0002ECA1A2A00E98CEC /* Debug */,
+				9341F0012ECA1A2A00E98CEC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9341EFD02ECA1A2800E98CEC /* Project object */;
+}
