@@ -9,7 +9,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @State private var name = ""
-    @State private var notificationsEnabled = true
+    @AppStorage("notificationsEnabled") private var notificationsEnabled = true
+    @State private var showingPermissionAlert = false
 
     var body: some View {
         NavigationStack {
@@ -38,9 +39,18 @@ struct SettingsView: View {
                             .tint(.forestGreen)
                             .foregroundColor(.warmBlack)
                             .listRowBackground(Color.creamCard)
+                            .onChange(of: notificationsEnabled) { oldValue, newValue in
+                                if newValue {
+                                    requestNotificationPermissions()
+                                }
+                            }
                     } header: {
                         Text("Notifications")
                             .foregroundColor(.forestGreen)
+                    } footer: {
+                        Text("Get notified when someone marks an item as purchased from your wishlist")
+                            .foregroundColor(.warmGray)
+                            .font(.caption)
                     }
 
                     Section {
@@ -94,6 +104,31 @@ struct SettingsView: View {
             }
             .navigationTitle("")
             .goldTitle("Settings")
+            .alert("Notifications Disabled", isPresented: $showingPermissionAlert) {
+                Button("Open Settings", role: .none) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    notificationsEnabled = false
+                }
+            } message: {
+                Text("Notification permissions were denied. Please enable them in Settings to receive purchase notifications.")
+            }
+        }
+    }
+
+    // MARK: - Functions
+
+    private func requestNotificationPermissions() {
+        Task {
+            let granted = await NotificationManager.shared.requestAuthorization()
+            if !granted {
+                await MainActor.run {
+                    showingPermissionAlert = true
+                }
+            }
         }
     }
 }

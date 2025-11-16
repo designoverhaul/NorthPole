@@ -174,6 +174,9 @@ struct FriendsListView: View {
                     friendUserRecordID: friendUserRecordID
                 )
 
+                // Small delay for CloudKit consistency
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+
                 // Reload friends
                 await loadFriends()
             } catch {

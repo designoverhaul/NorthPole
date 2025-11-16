@@ -149,31 +149,16 @@ struct FriendNameTitle: ViewModifier {
         content
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 4) {
-                        Text(firstName)
-                            .font(.custom("FleurDeLeah-Regular", size: 36))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [Color.gold, Color.goldShimmer, Color.gold],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
+                    Text(firstName)
+                        .font(.custom("FleurDeLeah-Regular", size: 48))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.gold, Color.goldShimmer, Color.gold],
+                                startPoint: .leading,
+                                endPoint: .trailing
                             )
-                            .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
-
-                        if !lastName.isEmpty {
-                            Text(lastName)
-                                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        colors: [Color.gold, Color.goldShimmer, Color.gold],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
-                        }
-                    }
+                        )
+                        .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
                 }
             }
             .toolbarBackground(.visible, for: .navigationBar)

@@ -222,27 +222,54 @@ class CloudKitManager: ObservableObject {
 
     // MARK: - Subscriptions (for real-time updates)
 
-    func subscribeToChanges() async throws {
-        // Subscribe to wishlist item changes
-        let subscriptionID = "wishlist-changes"
+    func subscribeToMyWishlistChanges() async throws {
+        guard let userRecordID = currentUserRecordID else {
+            throw CloudKitError.notSignedIn
+        }
+
+        // Subscribe to changes on MY wishlist items only
+        let subscriptionID = "my-wishlist-changes"
+        let predicate = NSPredicate(format: "ownerID == %@", userRecordID.recordName)
         let subscription = CKQuerySubscription(
             recordType: RecordType.wishlistItem.rawValue,
-            predicate: NSPredicate(value: true),
+            predicate: predicate,
             subscriptionID: subscriptionID,
-            options: [.firesOnRecordCreation, .firesOnRecordUpdate, .firesOnRecordDeletion]
+            options: [.firesOnRecordUpdate]  // Only fire on updates (not creation/deletion)
         )
 
-        let notification = CKSubscription.NotificationInfo()
-        notification.shouldSendContentAvailable = true
-        subscription.notificationInfo = notification
+        // Set up notification
+        let notificationInfo = CKSubscription.NotificationInfo()
+        notificationInfo.shouldSendContentAvailable = true
+        notificationInfo.alertBody = "Someone updated an item on your wishlist"
+        notificationInfo.soundName = "default"
+        subscription.notificationInfo = notificationInfo
 
         do {
-            try await privateDatabase.save(subscription)
-            print("☁️ CloudKit: Subscribed to changes")
+            try await publicDatabase.save(subscription)  // Save to PUBLIC database
+            print("☁️ CloudKit: Subscribed to my wishlist changes")
         } catch {
             // Subscription might already exist, that's ok
             print("☁️ CloudKit: Subscription already exists or error: \(error)")
         }
+    }
+
+    func handlePurchaseNotification(recordID: CKRecord.ID) async throws {
+        // Fetch the updated record
+        let record = try await publicDatabase.record(for: recordID)
+
+        // Check if it was marked as purchased
+        guard let isPurchased = record["isPurchased"] as? Bool,
+              isPurchased,
+              let itemName = record["name"] as? String else {
+            return
+        }
+
+        // Send local notification
+        // Note: We don't have the purchaser's name here, so we'll use "Someone"
+        await NotificationManager.shared.sendItemPurchasedNotification(
+            itemName: itemName,
+            friendName: "Someone"
+        )
     }
 }
 
