@@ -134,12 +134,15 @@ struct CloudKitAddGiftView: View {
             .navigationTitle("")
             .goldTitle("Add Gift")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
                         HapticManager.buttonTapped()
                         dismiss()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.warmGray)
                     }
-                    .foregroundColor(.warmGray)
                     .disabled(isSaving)
                 }
             }
@@ -275,6 +278,18 @@ struct CloudKitEditGiftView: View {
                         .buttonStyle(PrimaryButtonStyle())
                         .disabled(!isFormValid || isSaving)
                         .padding(.top, Spacing.md)
+
+                        // Delete button
+                        Button(action: deleteItem) {
+                            HStack {
+                                Image(systemName: "trash")
+                                Text("Delete Gift")
+                                    .fontWeight(.semibold)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(PrimaryButtonStyle(isDestructive: true))
+                        .disabled(isSaving)
                     }
                     .padding(Spacing.lg)
                 }
@@ -282,11 +297,14 @@ struct CloudKitEditGiftView: View {
             .navigationTitle("")
             .goldTitle("Edit Gift")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
                         dismiss()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.warmGray)
                     }
-                    .foregroundColor(.warmGray)
                     .disabled(isSaving)
                 }
             }
@@ -304,6 +322,22 @@ struct CloudKitEditGiftView: View {
                 dismiss()
             } catch {
                 print("❌ Error updating item: \(error)")
+                isSaving = false
+            }
+        }
+    }
+
+    private func deleteItem() {
+        isSaving = true
+
+        Task {
+            do {
+                try await cloudKit.deleteWishlistItem(item.record.recordID)
+                HapticManager.itemDeleted()
+                onItemUpdated()
+                dismiss()
+            } catch {
+                print("❌ Error deleting item: \(error)")
                 isSaving = false
             }
         }

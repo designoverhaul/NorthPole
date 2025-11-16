@@ -16,6 +16,7 @@ struct FriendWishlistView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showSuccessSparkle = false
+    @State private var showingShareSheet = false
 
     var body: some View {
         ZStack {
@@ -68,6 +69,9 @@ struct FriendWishlistView: View {
                 await loadItems()
             }
         }
+        .sheet(isPresented: $showingShareSheet) {
+            ShareSheet(activityItems: [createInviteMessage()])
+        }
         .alert("Error", isPresented: .constant(errorMessage != nil)) {
             Button("OK") {
                 errorMessage = nil
@@ -97,12 +101,12 @@ struct FriendWishlistView: View {
                 .multilineTextAlignment(.center)
 
             Button(action: {
-                // In a real app, this would open share sheet to invite
                 HapticManager.buttonTapped()
+                showingShareSheet = true
             }) {
                 HStack {
                     Image(systemName: "paperplane.fill")
-                    Text("Invite \(friend.name)")
+                    Text("Invite \(String(friend.name.split(separator: " ").first ?? ""))")
                 }
             }
             .buttonStyle(SecondaryButtonStyle())
@@ -180,6 +184,30 @@ struct FriendWishlistView: View {
             }
         }
     }
+
+    private func createInviteMessage() -> String {
+        let firstName = String(friend.name.split(separator: " ").first ?? "")
+        return """
+        Hey! I'm using Listmas to share my Christmas wishlist. Join me so we can see what we each want!
+
+        Download Listmas and add me as a friend.
+        """
+    }
+}
+
+// MARK: - Share Sheet
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: nil
+        )
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Friend Wishlist Item Row
