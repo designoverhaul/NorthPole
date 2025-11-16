@@ -17,6 +17,8 @@ struct CloudKitAddGiftView: View {
     @State private var name = ""
     @State private var url = ""
     @State private var description = ""
+    @State private var selectedImage: UIImage?
+    @State private var showingImagePicker = false
     @State private var isSaving = false
     @FocusState private var focusedField: Field?
 
@@ -111,6 +113,68 @@ struct CloudKitAddGiftView: View {
                                 .focused($focusedField, equals: .description)
                         }
 
+                        // Photo section
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            HStack {
+                                Text("Photo")
+                                    .font(.bodyMedium)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.warmBlack)
+
+                                Text("(Optional)")
+                                    .font(.caption)
+                                    .foregroundColor(.warmGray)
+                            }
+
+                            if let selectedImage = selectedImage {
+                                // Show selected image
+                                VStack(spacing: Spacing.sm) {
+                                    Image(uiImage: selectedImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 200)
+                                        .cornerRadius(CornerRadius.md)
+                                        .clipped()
+
+                                    Button(action: {
+                                        showingImagePicker = true
+                                    }) {
+                                        HStack {
+                                            Image(systemName: "photo")
+                                            Text("Change Photo")
+                                        }
+                                        .font(.bodyMedium)
+                                        .foregroundColor(.forestGreen)
+                                    }
+                                }
+                            } else {
+                                // Show add photo button
+                                Button(action: {
+                                    showingImagePicker = true
+                                }) {
+                                    HStack {
+                                        Image(systemName: "photo.badge.plus")
+                                            .font(.system(size: 24))
+
+                                        Text("Add Photo")
+                                            .font(.bodyMedium)
+                                            .fontWeight(.medium)
+                                    }
+                                    .foregroundColor(.forestGreen)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(Spacing.lg)
+                                    .background(Color.white)
+                                    .cornerRadius(CornerRadius.md)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                                            .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [5]))
+                                            .foregroundColor(.warmGrayLight)
+                                    )
+                                }
+                            }
+                        }
+
                         // Save button
                         Button(action: saveItem) {
                             HStack {
@@ -149,6 +213,9 @@ struct CloudKitAddGiftView: View {
             .onAppear {
                 focusedField = .name
             }
+            .sheet(isPresented: $showingImagePicker) {
+                ImagePicker(image: $selectedImage)
+            }
         }
     }
 
@@ -160,11 +227,13 @@ struct CloudKitAddGiftView: View {
 
         Task {
             do {
+                let imageData = selectedImage?.jpegData(compressionQuality: 0.7)
+
                 _ = try await cloudKit.saveWishlistItem(
                     name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                     url: url.isEmpty ? nil : url.trimmingCharacters(in: .whitespacesAndNewlines),
                     description: description.isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines),
-                    imageData: nil
+                    imageData: imageData
                 )
 
                 onItemAdded()
@@ -340,6 +409,47 @@ struct CloudKitEditGiftView: View {
                 print("❌ Error deleting item: \(error)")
                 isSaving = false
             }
+        }
+    }
+}
+
+// MARK: - Image Picker
+struct ImagePicker: UIViewControllerRepresentable {
+    @Binding var image: UIImage?
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.delegate = context.coordinator
+        picker.allowsEditing = true
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: ImagePicker
+
+        init(_ parent: ImagePicker) {
+            self.parent = parent
+        }
+
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let editedImage = info[.editedImage] as? UIImage {
+                parent.image = editedImage
+            } else if let originalImage = info[.originalImage] as? UIImage {
+                parent.image = originalImage
+            }
+
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
         }
     }
 }
