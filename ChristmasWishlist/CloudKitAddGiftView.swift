@@ -12,7 +12,9 @@ struct CloudKitAddGiftView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var cloudKit = CloudKitManager.shared
 
-    let onItemAdded: () -> Void
+    let ownerRecordID: String?
+    let ownerName: String
+    let onItemAdded: (CKWishlistItem) -> Void
 
     @State private var name = ""
     @State private var url = ""
@@ -20,6 +22,8 @@ struct CloudKitAddGiftView: View {
     @State private var selectedImage: UIImage?
     @State private var showingImagePicker = false
     @State private var isSaving = false
+    @State private var isExtractingData = false
+    @State private var previousURLLength = 0
     @FocusState private var focusedField: Field?
 
     enum Field {
@@ -38,6 +42,21 @@ struct CloudKitAddGiftView: View {
 
                 ScrollView {
                     VStack(spacing: Spacing.lg) {
+                        // Owner indicator (if adding for a child)
+                        if ownerName != "Me" {
+                            HStack {
+                                Image(systemName: "figure.2.and.child.holdinghands")
+                                    .foregroundColor(.forestGreen)
+                                Text("Adding gift for \(ownerName)")
+                                    .font(.bodyMedium)
+                                    .foregroundColor(.warmGray)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Spacing.md)
+                            .background(Color.creamCard)
+                            .cornerRadius(CornerRadius.md)
+                        }
+
                         // Name field
                         VStack(alignment: .leading, spacing: Spacing.sm) {
                             Text("Item Name")
@@ -71,19 +90,62 @@ struct CloudKitAddGiftView: View {
                                     .foregroundColor(.warmGray)
                             }
 
-                            TextField("https://example.com/product", text: $url)
-                                .font(.bodyMedium)
-                                .foregroundColor(.warmBlack)
-                                .keyboardType(.URL)
-                                .autocapitalization(.none)
-                                .padding(Spacing.md)
-                                .background(Color.white)
-                                .cornerRadius(CornerRadius.md)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: CornerRadius.md)
-                                        .stroke(focusedField == .url ? Color.forestGreen : Color.warmGrayLight, lineWidth: 2)
-                                )
-                                .focused($focusedField, equals: .url)
+                            HStack(spacing: 0) {
+                                ZStack(alignment: .leading) {
+                                    if url.isEmpty {
+                                        Text("https://example.com/product")
+                                            .font(.bodyMedium)
+                                            .foregroundColor(.gray.opacity(0.5))
+                                            .padding(Spacing.md)
+                                            .allowsHitTesting(false)
+                                    }
+
+                                    TextField("", text: $url)
+                                        .font(.bodyMedium)
+                                        .foregroundColor(.warmBlack)
+                                        .keyboardType(.URL)
+                                        .autocapitalization(.none)
+                                        .padding(Spacing.md)
+                                        .focused($focusedField, equals: .url)
+                                        .tint(.forestGreen)
+                                }
+
+                                Button(action: {
+                                    if let pastedString = UIPasteboard.general.string {
+                                        url = pastedString
+                                    }
+                                    HapticManager.buttonTapped()
+                                }) {
+                                    Text("Paste")
+                                        .font(.bodyMedium)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(UIPasteboard.general.hasStrings ? .forestGreen : .warmGrayLight)
+                                        .padding(.horizontal, Spacing.md)
+                                }
+                                .disabled(!UIPasteboard.general.hasStrings)
+                            }
+                            .background(Color.white)
+                            .cornerRadius(CornerRadius.md)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CornerRadius.md)
+                                    .stroke(focusedField == .url ? Color.forestGreen : Color.warmGrayLight, lineWidth: 2)
+                            )
+                            .onChange(of: url) { oldValue, newValue in
+                                handleURLChange(oldValue: oldValue, newValue: newValue)
+                            }
+
+                            // Extraction indicator
+                            if isExtractingData {
+                                HStack(spacing: Spacing.sm) {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                        .tint(.forestGreen)
+                                    Text("Extracting product info...")
+                                        .font(.caption)
+                                        .foregroundColor(.forestGreen)
+                                }
+                                .padding(.top, Spacing.xs)
+                            }
                         }
 
                         // Description field
@@ -196,7 +258,7 @@ struct CloudKitAddGiftView: View {
                 }
             }
             .navigationTitle("")
-            .goldTitle("Add Gift")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
@@ -210,6 +272,7 @@ struct CloudKitAddGiftView: View {
                     .disabled(isSaving)
                 }
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
             .onAppear {
                 focusedField = .name
             }
@@ -229,20 +292,76 @@ struct CloudKitAddGiftView: View {
             do {
                 let imageData = selectedImage?.jpegData(compressionQuality: 0.7)
 
-                _ = try await cloudKit.saveWishlistItem(
+                let savedRecord = try await cloudKit.saveWishlistItem(
                     name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                     url: url.isEmpty ? nil : url.trimmingCharacters(in: .whitespacesAndNewlines),
                     description: description.isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines),
-                    imageData: imageData
+                    imageData: imageData,
+                    ownerRecordID: ownerRecordID
                 )
 
-                onItemAdded()
+                let newItem = CKWishlistItem(from: savedRecord)
+                onItemAdded(newItem)
                 dismiss()
             } catch {
                 print("❌ Error saving item: \(error)")
                 // TODO: Show error alert
                 isSaving = false
             }
+        }
+    }
+
+    // MARK: - URL Extraction
+
+    private func handleURLChange(oldValue: String, newValue: String) {
+        // Detect paste (significant length increase)
+        let lengthIncrease = newValue.count - oldValue.count
+
+        // If user pasted a URL (length increased by >10 chars) and it looks like a URL
+        if lengthIncrease > 10 && newValue.contains(".") && !isExtractingData {
+            extractProductData(from: newValue)
+        }
+
+        previousURLLength = newValue.count
+    }
+
+    private func extractProductData(from urlString: String) {
+        isExtractingData = true
+
+        Task {
+            let productData = await URLProductExtractor.extract(from: urlString)
+
+            // Fill in extracted data (only if fields are currently empty)
+            if let extractedName = productData.name, name.isEmpty {
+                name = extractedName
+            }
+
+            if let extractedDescription = productData.description, description.isEmpty {
+                // Append price to description if available
+                if let price = productData.price {
+                    self.description = "\(extractedDescription)\n\nPrice: \(price)"
+                } else {
+                    self.description = extractedDescription
+                }
+            } else if let price = productData.price, description.isEmpty {
+                // Only price available
+                self.description = "Price: \(price)"
+            }
+
+            // Download and set image if available
+            if let imageURL = productData.imageURL, selectedImage == nil {
+                if let imageData = await ProductImageDownloader.shared.downloadImage(from: imageURL),
+                   let image = UIImage(data: imageData) {
+                    selectedImage = image
+                }
+            }
+
+            // Provide haptic feedback on successful extraction
+            if productData.hasData {
+                HapticManager.itemAdded()
+            }
+
+            isExtractingData = false
         }
     }
 }
@@ -254,7 +373,8 @@ struct CloudKitEditGiftView: View {
     @StateObject private var cloudKit = CloudKitManager.shared
 
     @State var item: CKWishlistItem
-    let onItemUpdated: () -> Void
+    let onItemUpdated: (CKWishlistItem) -> Void
+    let onItemDeleted: ((String) -> Void)?
 
     @State private var isSaving = false
     @FocusState private var focusedField: Field?
@@ -298,18 +418,45 @@ struct CloudKitEditGiftView: View {
                                 .fontWeight(.semibold)
                                 .foregroundColor(.warmBlack)
 
-                            TextField("https://example.com/product", text: Binding(
-                                get: { item.url ?? "" },
-                                set: { item.url = $0.isEmpty ? nil : $0 }
-                            ))
-                                .font(.bodyMedium)
-                                .foregroundColor(.warmBlack)
-                                .keyboardType(.URL)
-                                .autocapitalization(.none)
-                                .padding(Spacing.md)
-                                .background(Color.white)
-                                .cornerRadius(CornerRadius.md)
-                                .focused($focusedField, equals: .url)
+                            HStack(spacing: 0) {
+                                ZStack(alignment: .leading) {
+                                    if (item.url ?? "").isEmpty {
+                                        Text("https://example.com/product")
+                                            .font(.bodyMedium)
+                                            .foregroundColor(.gray.opacity(0.5))
+                                            .padding(Spacing.md)
+                                            .allowsHitTesting(false)
+                                    }
+
+                                    TextField("", text: Binding(
+                                        get: { item.url ?? "" },
+                                        set: { item.url = $0.isEmpty ? nil : $0 }
+                                    ))
+                                        .font(.bodyMedium)
+                                        .foregroundColor(.warmBlack)
+                                        .keyboardType(.URL)
+                                        .autocapitalization(.none)
+                                        .padding(Spacing.md)
+                                        .focused($focusedField, equals: .url)
+                                        .tint(.forestGreen)
+                                }
+
+                                Button(action: {
+                                    if let pastedString = UIPasteboard.general.string {
+                                        item.url = pastedString
+                                    }
+                                    HapticManager.buttonTapped()
+                                }) {
+                                    Text("Paste")
+                                        .font(.bodyMedium)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(UIPasteboard.general.hasStrings ? .forestGreen : .warmGrayLight)
+                                        .padding(.horizontal, Spacing.md)
+                                }
+                                .disabled(!UIPasteboard.general.hasStrings)
+                            }
+                            .background(Color.white)
+                            .cornerRadius(CornerRadius.md)
                         }
 
                         // Description field
@@ -355,9 +502,17 @@ struct CloudKitEditGiftView: View {
                                 Text("Delete Gift")
                                     .fontWeight(.semibold)
                             }
+                            .foregroundColor(.warmGray)
                             .frame(maxWidth: .infinity)
+                            .padding(.horizontal, Spacing.lg)
+                            .padding(.vertical, Spacing.md)
+                            .background(Color.creamCard)
+                            .cornerRadius(CornerRadius.md)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CornerRadius.md)
+                                    .stroke(Color.warmGrayLight, lineWidth: 1.5)
+                            )
                         }
-                        .buttonStyle(PrimaryButtonStyle(isDestructive: true))
                         .disabled(isSaving)
                     }
                     .padding(Spacing.lg)
@@ -387,7 +542,7 @@ struct CloudKitEditGiftView: View {
             do {
                 item.updateRecord()
                 try await cloudKit.updateWishlistItem(item.record)
-                onItemUpdated()
+                onItemUpdated(item)
                 dismiss()
             } catch {
                 print("❌ Error updating item: \(error)")
@@ -403,7 +558,7 @@ struct CloudKitEditGiftView: View {
             do {
                 try await cloudKit.deleteWishlistItem(item.record.recordID)
                 HapticManager.itemDeleted()
-                onItemUpdated()
+                onItemDeleted?(item.id)
                 dismiss()
             } catch {
                 print("❌ Error deleting item: \(error)")
@@ -455,5 +610,5 @@ struct ImagePicker: UIViewControllerRepresentable {
 }
 
 #Preview {
-    CloudKitAddGiftView(onItemAdded: {})
+    CloudKitAddGiftView(ownerRecordID: nil, ownerName: "Me", onItemAdded: { _ in })
 }

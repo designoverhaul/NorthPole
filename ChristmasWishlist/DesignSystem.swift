@@ -119,6 +119,7 @@ struct GoldGradientTitle: ViewModifier {
             }
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarBackground(Color.creamBackground, for: .navigationBar)
+            .toolbarTitleDisplayMode(.inline)
     }
 }
 
@@ -147,10 +148,13 @@ struct FriendNameTitle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .toolbar {
-                ToolbarItem(placement: .principal) {
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(Color.creamBackground, for: .navigationBar)
+            .toolbarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 0) {
                     Text(firstName)
-                        .font(.custom("FleurDeLeah-Regular", size: 48))
+                        .font(.custom("FleurDeLeah-Regular", size: 58))
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [Color.gold, Color.goldShimmer, Color.gold],
@@ -159,9 +163,13 @@ struct FriendNameTitle: ViewModifier {
                             )
                         )
                         .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.creamBackground)
                 }
             }
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(Color.creamBackground, for: .navigationBar)
     }
 }

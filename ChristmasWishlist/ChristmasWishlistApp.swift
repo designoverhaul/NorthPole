@@ -14,11 +14,17 @@ private let logger = Logger(subsystem: "com.designoverhaul.ChristmasWishlist", c
 @main
 struct ChristmasWishlistApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @State private var hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
 
     var body: some Scene {
         WindowGroup {
-            MainTabView()
-                .preferredColorScheme(.light) // Force light mode only
+            if hasCompletedOnboarding {
+                MainTabView()
+                    .preferredColorScheme(.light) // Force light mode only
+            } else {
+                OnboardingView(isCompleted: $hasCompletedOnboarding)
+                    .preferredColorScheme(.light) // Force light mode only
+            }
         }
     }
 }
@@ -26,6 +32,8 @@ struct ChristmasWishlistApp: App {
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, UIApplicationDelegate {
+    private var cloudKitObserver: Task<Void, Never>?
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
@@ -35,10 +43,18 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Register for remote notifications
         application.registerForRemoteNotifications()
 
-        // Subscribe to CloudKit changes
-        Task {
+        // Wait for CloudKit sign-in, then subscribe to changes
+        cloudKitObserver = Task { @MainActor in
+            let cloudKit = CloudKitManager.shared
+
+            // Wait for sign-in to complete
+            while !cloudKit.isSignedInToiCloud {
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+            }
+
+            // Now safe to subscribe
             do {
-                try await CloudKitManager.shared.subscribeToMyWishlistChanges()
+                try await cloudKit.subscribeToMyWishlistChanges()
             } catch {
                 logger.error("Failed to subscribe to CloudKit changes: \(error.localizedDescription)")
             }

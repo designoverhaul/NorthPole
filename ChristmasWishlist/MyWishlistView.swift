@@ -11,6 +11,7 @@ import SwiftData
 struct MyWishlistView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WishlistItem.createdAt, order: .reverse) private var items: [WishlistItem]
+    @Query private var children: [Child]
 
     @State private var showingAddGift = false
     @State private var itemToEdit: WishlistItem?
@@ -30,6 +31,10 @@ struct MyWishlistView: View {
         items.filter { $0.ownerId == currentUserId }
     }
 
+    var titleText: String {
+        children.isEmpty ? "My Wishlist" : "Our Wishlists"
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -42,7 +47,7 @@ struct MyWishlistView: View {
                         emptyStateView
                     } else {
                         ScrollView {
-                            LazyVStack(spacing: Spacing.md) {
+                            LazyVStack(spacing: 2) {
                                 ForEach(myItems) { item in
                                     WishlistItemRow(
                                         item: item,
@@ -96,7 +101,7 @@ struct MyWishlistView: View {
                 }
             }
             .navigationTitle("")
-            .goldTitle("My Wishlist")
+            .goldTitle(titleText)
             .sheet(isPresented: $showingAddGift) {
                 AddGiftView(userId: currentUserId, onItemAdded: {
                     showSuccessSparkle = true

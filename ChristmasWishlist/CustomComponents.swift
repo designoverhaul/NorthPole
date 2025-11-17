@@ -125,27 +125,12 @@ struct WishlistItemRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(item.name)
-                    .font(.bodyLarge)
-                    .fontWeight(.medium)
-                    .foregroundColor(item.isPurchased ? .warmGray : .warmBlack)
-                    .strikethrough(item.isPurchased, color: .warmGray)
-
-                if let url = item.url, !url.isEmpty {
-                    Text(url)
-                        .font(.caption)
-                        .foregroundColor(.warmGray)
-                        .lineLimit(1)
-                }
-
-                if let description = item.itemDescription, !description.isEmpty {
-                    Text(description)
-                        .font(.bodySmall)
-                        .foregroundColor(.warmGray)
-                        .lineLimit(2)
-                }
-            }
+            Text(item.name)
+                .font(.custom("Caveat", size: 32))
+                .lineSpacing(-18)
+                .foregroundColor(item.isPurchased ? .warmGray : .warmBlack)
+                .strikethrough(item.isPurchased, color: .warmGray)
+                .lineLimit(2)
 
             Spacer()
 
@@ -158,17 +143,10 @@ struct WishlistItemRow: View {
                         .foregroundColor(item.isPurchased ? .successGreen : .warmGrayLight)
                 }
                 .buttonStyle(PlainButtonStyle())
-            } else if let onDelete = onDelete {
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 20))
-                        .foregroundColor(.warmGray)
-                }
-                .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(Spacing.md)
-        .background(Color.creamCard)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
         .cornerRadius(CornerRadius.md)
         .shadow(
             color: DesignShadow.soft,
@@ -182,6 +160,8 @@ struct WishlistItemRow: View {
 // MARK: - Friend Row
 struct FriendRow: View {
     let friend: CKFriend
+    let itemCount: Int?
+    let onInvite: () -> Void
 
     var body: some View {
         HStack(spacing: Spacing.md) {
@@ -222,22 +202,45 @@ struct FriendRow: View {
 
                 if friend.hasApp {
                     HStack(spacing: 4) {
-                        Image(systemName: "checkmark.seal.fill")
+                        Image(systemName: "gift.fill")
                             .font(.caption)
                             .foregroundColor(.gold)
 
-                        Text("Has app")
-                            .font(.caption)
-                            .foregroundColor(.warmGray)
+                        if let count = itemCount {
+                            Text("\(count) \(count == 1 ? "item" : "items")")
+                                .font(.caption)
+                                .foregroundColor(.warmGray)
+                        } else {
+                            Text("Loading...")
+                                .font(.caption)
+                                .foregroundColor(.warmGray)
+                        }
                     }
                 }
             }
 
             Spacer()
 
-            Image(systemName: "chevron.right")
-                .font(.bodySmall)
-                .foregroundColor(.warmGrayLight)
+            if friend.hasApp {
+                Image(systemName: "chevron.right")
+                    .font(.bodySmall)
+                    .foregroundColor(.warmGrayLight)
+            } else {
+                Button(action: onInvite) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "paperplane.fill")
+                        Text("Invite")
+                    }
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.forestGreen)
+                    .padding(.horizontal, Spacing.sm)
+                    .padding(.vertical, 6)
+                    .background(Color.goldLight.opacity(0.3))
+                    .cornerRadius(CornerRadius.sm)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
         .padding(Spacing.md)
         .background(Color.creamCard)
@@ -248,5 +251,66 @@ struct FriendRow: View {
             x: 0,
             y: 2
         )
+    }
+}
+
+// MARK: - Child Row
+
+struct ChildRow: View {
+    let child: CKChild
+    let itemCount: Int?
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            // Child icon
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.goldLight.opacity(0.8), Color.gold.opacity(0.6)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 36, height: 36)
+
+                Image(systemName: "figure.child")
+                    .font(.caption)
+                    .foregroundColor(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(child.name)
+                    .font(.bodyMedium)
+                    .fontWeight(.medium)
+                    .foregroundColor(.warmBlack)
+
+                HStack(spacing: 4) {
+                    Image(systemName: "gift.fill")
+                        .font(.caption2)
+                        .foregroundColor(.gold)
+
+                    if let count = itemCount {
+                        Text("\(count) \(count == 1 ? "item" : "items")")
+                            .font(.caption)
+                            .foregroundColor(.warmGray)
+                    } else {
+                        Text("Loading...")
+                            .font(.caption)
+                            .foregroundColor(.warmGray)
+                    }
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(.warmGrayLight)
+        }
+        .padding(Spacing.sm)
+        .padding(.leading, Spacing.md)
+        .background(Color.creamCard.opacity(0.6))
+        .cornerRadius(CornerRadius.md)
     }
 }

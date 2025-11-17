@@ -18,6 +18,7 @@ struct CKWishlistItem: Identifiable {
     var url: String?
     var itemDescription: String?
     var isPurchased: Bool
+    var purchasedAt: Date?
     var createdAt: Date
     var ownerID: String
     var imageData: Data?
@@ -29,6 +30,7 @@ struct CKWishlistItem: Identifiable {
         self.url = record["url"] as? String
         self.itemDescription = record["itemDescription"] as? String
         self.isPurchased = record["isPurchased"] as? Bool ?? false
+        self.purchasedAt = record["purchasedAt"] as? Date
         self.createdAt = record["createdAt"] as? Date ?? Date()
         self.ownerID = record["ownerID"] as? String ?? ""
 
@@ -45,6 +47,9 @@ struct CKWishlistItem: Identifiable {
         record["url"] = (url ?? "") as CKRecordValue
         record["itemDescription"] = (itemDescription ?? "") as CKRecordValue
         record["isPurchased"] = isPurchased as CKRecordValue
+        if let purchasedAt = purchasedAt {
+            record["purchasedAt"] = purchasedAt as CKRecordValue
+        }
     }
 }
 
@@ -60,12 +65,18 @@ struct CKFriend: Identifiable {
     var friendUserRecordID: String?
     var addedAt: Date
     var imageData: Data?
+    var children: [CKChild]
+    var hiddenChildRecordIDs: [String]
 
     var hasApp: Bool {
         friendUserRecordID != nil && !friendUserRecordID!.isEmpty
     }
 
-    init(from record: CKRecord) {
+    var visibleChildren: [CKChild] {
+        children.filter { !hiddenChildRecordIDs.contains($0.id) }
+    }
+
+    init(from record: CKRecord, children: [CKChild] = []) {
         self.record = record
         self.id = record.recordID.recordName
         self.name = record["name"] as? String ?? ""
@@ -74,6 +85,8 @@ struct CKFriend: Identifiable {
         self.ownerID = record["ownerID"] as? String ?? ""
         self.friendUserRecordID = record["friendUserRecordID"] as? String
         self.addedAt = record["addedAt"] as? Date ?? Date()
+        self.children = children
+        self.hiddenChildRecordIDs = (record["hiddenChildRecordIDs"] as? [String]) ?? []
 
         // Load photo from CKAsset
         if let asset = record["photo"] as? CKAsset,
@@ -95,5 +108,41 @@ struct CKUser: Identifiable {
         self.record = record
         self.id = record.recordID.recordName
         self.name = record["name"] as? String ?? ""
+    }
+}
+
+// MARK: - CloudKit Child
+
+struct CKChild: Identifiable {
+    let id: String
+    let record: CKRecord
+    var name: String
+    var parentUserRecordID: String
+    var createdAt: Date
+
+    init(from record: CKRecord) {
+        self.record = record
+        self.id = record.recordID.recordName
+        self.name = record["name"] as? String ?? ""
+        self.parentUserRecordID = record["parentUserRecordID"] as? String ?? ""
+        self.createdAt = record["createdAt"] as? Date ?? Date()
+    }
+}
+
+// MARK: - CloudKit Purchase
+
+struct CKPurchase: Identifiable {
+    let id: String
+    let record: CKRecord
+    var itemRecordID: String
+    var purchaserUserRecordID: String
+    var purchasedAt: Date
+
+    init(from record: CKRecord) {
+        self.record = record
+        self.id = record.recordID.recordName
+        self.itemRecordID = record["itemRecordID"] as? String ?? ""
+        self.purchaserUserRecordID = record["purchaserUserRecordID"] as? String ?? ""
+        self.purchasedAt = record["purchasedAt"] as? Date ?? Date()
     }
 }

@@ -12,23 +12,29 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            CloudKitWishlistView()
+            CloudKitWishlistView(isActive: selectedTab == 0)
                 .tabItem {
                     Label("My Wishlist", systemImage: "gift")
                 }
                 .tag(0)
 
-            FriendsListView()
+            FriendsListView(isActive: selectedTab == 1)
                 .tabItem {
                     Label("Friends", systemImage: "person.2")
                 }
                 .tag(1)
 
-            SettingsView()
+            AskSantaView(isActive: .constant(selectedTab == 2))
+                .tabItem {
+                    Label("Ask Santa", systemImage: "sparkles")
+                }
+                .tag(2)
+
+            SettingsView(isActive: selectedTab == 3)
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
-                .tag(2)
+                .tag(3)
         }
         .tint(.forestGreen)
         .onChange(of: selectedTab) { _, _ in

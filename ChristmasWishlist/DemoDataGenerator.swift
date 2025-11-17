@@ -141,6 +141,107 @@ enum DemoDataGenerator {
             context.insert(item)
         }
 
+        // Create Sarah (friend with children)
+        let sarahId = UUID()
+        let sarah = Friend(
+            name: "Sarah",
+            phoneNumber: "555-0104",
+            email: "sarah@example.com",
+            hasApp: true,
+            userId: sarahId
+        )
+        context.insert(sarah)
+
+        // Create Sarah's children
+        let emmaId = UUID()
+        let oliverId = UUID()
+
+        let emma = Child(
+            id: emmaId,
+            name: "Emma",
+            parentId: sarahId
+        )
+        context.insert(emma)
+
+        let oliver = Child(
+            id: oliverId,
+            name: "Oliver",
+            parentId: sarahId
+        )
+        context.insert(oliver)
+
+        // Create Sarah's wishlist items
+        let sarahItems = [
+            WishlistItem(
+                name: "Kitchen Stand Mixer",
+                url: "https://www.example.com/mixer",
+                itemDescription: "KitchenAid, any color",
+                ownerId: sarahId
+            ),
+            WishlistItem(
+                name: "Gardening Tools Set",
+                url: nil,
+                itemDescription: "Complete set with trowel, pruners, and gloves",
+                ownerId: sarahId
+            )
+        ]
+
+        for item in sarahItems {
+            context.insert(item)
+        }
+
+        // Create Emma's wishlist items
+        let emmaItems = [
+            WishlistItem(
+                name: "Art Supply Kit",
+                url: "https://www.example.com/art-kit",
+                itemDescription: "Watercolors, brushes, and sketch pad",
+                ownerId: emmaId
+            ),
+            WishlistItem(
+                name: "Unicorn Backpack",
+                url: nil,
+                itemDescription: "Purple or pink with sparkles",
+                ownerId: emmaId
+            ),
+            WishlistItem(
+                name: "Chapter Books Set",
+                url: "https://www.example.com/books",
+                itemDescription: "Age 8-10, fantasy or adventure",
+                ownerId: emmaId
+            )
+        ]
+
+        for item in emmaItems {
+            context.insert(item)
+        }
+
+        // Create Oliver's wishlist items
+        let oliverItems = [
+            WishlistItem(
+                name: "LEGO Star Wars Set",
+                url: "https://www.example.com/lego",
+                itemDescription: "Millennium Falcon or X-Wing",
+                ownerId: oliverId
+            ),
+            WishlistItem(
+                name: "Soccer Ball",
+                url: nil,
+                itemDescription: "Size 4, official match ball",
+                ownerId: oliverId
+            ),
+            WishlistItem(
+                name: "Remote Control Car",
+                url: "https://www.example.com/rc-car",
+                itemDescription: "Fast, durable for outdoor use",
+                ownerId: oliverId
+            )
+        ]
+
+        for item in oliverItems {
+            context.insert(item)
+        }
+
         // Save context
         try? context.save()
     }
@@ -148,6 +249,7 @@ enum DemoDataGenerator {
     static func clearAllData(in context: ModelContext) {
         // Delete all items
         try? context.delete(model: WishlistItem.self)
+        try? context.delete(model: Child.self)
         try? context.delete(model: Friend.self)
         try? context.delete(model: User.self)
 

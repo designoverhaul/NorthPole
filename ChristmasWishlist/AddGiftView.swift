@@ -87,19 +87,29 @@ struct AddGiftView: View {
                                     .foregroundColor(.warmGray)
                             }
 
-                            TextField("https://example.com/product", text: $url)
-                                .font(.bodyMedium)
-                                .foregroundColor(.warmBlack)
-                                .keyboardType(.URL)
-                                .autocapitalization(.none)
-                                .padding(Spacing.md)
-                                .background(Color.white)
-                                .cornerRadius(CornerRadius.md)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: CornerRadius.md)
-                                        .stroke(focusedField == .url ? Color.forestGreen : Color.warmGrayLight, lineWidth: 2)
-                                )
-                                .focused($focusedField, equals: .url)
+                            ZStack(alignment: .leading) {
+                                if url.isEmpty {
+                                    Text("https://example.com/product")
+                                        .font(.bodyMedium)
+                                        .foregroundColor(.gray.opacity(0.5))
+                                        .padding(Spacing.md)
+                                        .allowsHitTesting(false)
+                                }
+
+                                TextField("", text: $url)
+                                    .font(.bodyMedium)
+                                    .foregroundColor(.warmBlack)
+                                    .keyboardType(.URL)
+                                    .autocapitalization(.none)
+                                    .padding(Spacing.md)
+                                    .focused($focusedField, equals: .url)
+                            }
+                            .background(Color.white)
+                            .cornerRadius(CornerRadius.md)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CornerRadius.md)
+                                    .stroke(focusedField == .url ? Color.forestGreen : Color.warmGrayLight, lineWidth: 2)
+                            )
                         }
 
                         // Description field (optional)

@@ -22,6 +22,7 @@ struct SparkleEffect: View {
     let particleCount: Int
     @State private var particles: [SparkleParticle] = []
     @State private var animate = false
+    @State private var twinkle = false
 
     init(particleCount: Int = 12) {
         self.particleCount = particleCount
@@ -31,29 +32,32 @@ struct SparkleEffect: View {
         GeometryReader { geometry in
             ZStack {
                 ForEach(particles) { particle in
-                    Circle()
-                        .fill(
+                    // Star shape for sparkle effect
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(
                             LinearGradient(
-                                colors: [Color.gold, Color.goldShimmer, Color.goldLight],
+                                colors: [.white, .white.opacity(0.8)],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
                         )
-                        .frame(width: 4 * particle.scale, height: 4 * particle.scale)
+                        .font(.system(size: 8 * particle.scale))
                         .position(x: particle.x, y: particle.y)
-                        .opacity(animate ? particle.opacity : 0)
-                        .scaleEffect(animate ? 1 : 0.3)
+                        .opacity(twinkle ? particle.opacity : 0.2)
+                        .scaleEffect(twinkle ? 1.2 : 0.6)
+                        .rotationEffect(.degrees(twinkle ? 180 : 0))
                         .animation(
-                            .easeInOut(duration: 1.5)
+                            .easeInOut(duration: 0.8)
                             .repeatForever(autoreverses: true)
                             .delay(particle.delay),
-                            value: animate
+                            value: twinkle
                         )
+                        .shadow(color: .white.opacity(0.8), radius: 4)
                 }
             }
             .onAppear {
                 generateParticles(in: geometry.size)
-                animate = true
+                twinkle = true
             }
         }
     }
