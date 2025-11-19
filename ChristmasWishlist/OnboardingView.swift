@@ -34,7 +34,9 @@ struct OnboardingView: View {
     @Binding var isCompleted: Bool
 
     var body: some View {
-        ZStack {
+        let _ = print("🎄 [ONBOARDING] Body evaluated - isCompleted = \(isCompleted)")
+
+        return ZStack {
             Color.creamBackground
                 .ignoresSafeArea()
 
@@ -48,6 +50,9 @@ struct OnboardingView: View {
             case .instructions:
                 instructionsScreen
             }
+        }
+        .onChange(of: isCompleted) { oldValue, newValue in
+            print("🎄 [ONBOARDING] ⚡ isCompleted binding changed from \(oldValue) to \(newValue)")
         }
         .fallingSnow(isActive: true, count: 25)
         .sheet(isPresented: $showingContactPicker) {
@@ -87,14 +92,14 @@ struct OnboardingView: View {
 
             // Santa's message (directly on background, no container)
             VStack(spacing: Spacing.md) {
-                Text("Welcome!\nI'll be your gifting matchmaker.")
+                Text("Welcome!\nCan I ask for some help? ")
                     .font(.custom("Caveat", size: 32))
                     .lineSpacing(-8)
                     .foregroundColor(.warmBlack)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Please select everyone that you may exchange gifts with.")
+                Text("Please select everyone that you\nmay exchange gifts with.")
                     .font(.bodyLarge)
                     .foregroundColor(.warmGray)
                     .multilineTextAlignment(.center)
@@ -272,10 +277,16 @@ struct OnboardingView: View {
                     HapticManager.buttonTapped()
                     processChildren()
                 } label: {
-                    Text(childrenToAdd.isEmpty ? "Skip for now" : "Continue")
-                        .font(.headingSmall)
-                        .bold()
-                        .foregroundColor(childrenToAdd.isEmpty ? .warmGray : Color(hex: "#8B2E1F"))
+                    if childrenToAdd.isEmpty {
+                        Text("Skip for now")
+                            .font(.bodyMedium)
+                            .foregroundColor(.warmGray)
+                    } else {
+                        Text("Continue")
+                            .font(.headingSmall)
+                            .bold()
+                            .foregroundColor(Color(hex: "#8B2E1F"))
+                    }
                 }
                 .padding(.bottom, Spacing.xl)
             }
@@ -298,7 +309,7 @@ struct OnboardingView: View {
                             .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 2)
                     )
             }
-            .padding(.top, 60)
+            .padding(.top, 16)
             .padding(.leading, Spacing.lg)
         }
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
@@ -420,7 +431,7 @@ struct OnboardingView: View {
                             .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 2)
                     )
             }
-            .padding(.top, 60)
+            .padding(.top, 16)
             .padding(.leading, Spacing.lg)
         }
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
@@ -435,7 +446,7 @@ struct OnboardingView: View {
 
                 // Heading
                 Text("Adding items\nto your wishlist")
-                    .font(.custom("Caveat", size: 32))
+                    .font(.custom("Caveat", size: 36))
                     .lineSpacing(-8)
                     .foregroundColor(.warmBlack)
                     .multilineTextAlignment(.center)
@@ -454,9 +465,12 @@ struct OnboardingView: View {
 
                 // Continue Button
                 Button {
+                    print("🎄 [ONBOARDING] Get Started button pressed")
                     HapticManager.buttonTapped()
-                    UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+
+                    // ONLY set the binding - @AppStorage automatically writes to UserDefaults
                     isCompleted = true
+                    print("🎄 [ONBOARDING] isCompleted set to true - @AppStorage will handle UserDefaults")
                 } label: {
                     VStack(spacing: Spacing.xs) {
                         Text("Get Started")
@@ -505,7 +519,7 @@ struct OnboardingView: View {
                             .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 2)
                     )
             }
-            .padding(.top, 60)
+            .padding(.top, 16)
             .padding(.leading, Spacing.lg)
         }
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
@@ -560,11 +574,6 @@ struct OnboardingView: View {
         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
             currentStep = .instructions
         }
-    }
-
-    private func handleSurprisePreference(showPurchased: Bool) {
-        showPurchasedItems = showPurchased
-        completeOnboarding()
     }
 
     private func addChild() {
@@ -695,12 +704,6 @@ struct OnboardingView: View {
         }
     }
 
-    private func completeOnboarding() {
-        UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-            isCompleted = true
-        }
-    }
 }
 
 // MARK: - Multi-Contact Picker

@@ -21,6 +21,9 @@ class CloudKitManager: ObservableObject {
     @Published var currentUserRecordID: CKRecord.ID?
     @Published var isSignedInToiCloud = false
     @Published var shouldRefreshFriends = false
+    @Published var cachedFriends: [CKFriend] = []
+    @Published var cachedFriendItemCounts: [String: Int] = [:]
+    @Published var isPreloadingFriends = false
 
     // Polling for purchase notifications (fallback when push doesn't work)
     private var purchasePollingTask: Task<Void, Never>?
@@ -227,6 +230,78 @@ class CloudKitManager: ObservableObject {
 
         try await privateDatabase.save(friendRecord)
         print("☁️ CloudKit: Unhid child \(childRecordID) from friend")
+    }
+
+    /// Preload friends data in background for instant display when user navigates to Friends tab
+    func preloadFriendsData() async {
+        let startTime = Date()
+        print("⏱️ [PRELOAD] Starting friends preload...")
+
+        isPreloadingFriends = true
+        defer { isPreloadingFriends = false }
+
+        do {
+            // Fetch friends
+            let fetchStart = Date()
+            let records = try await fetchMyFriends()
+            print("⏱️ [PRELOAD] Fetched \(records.count) friend records in \(Date().timeIntervalSince(fetchStart).formatted())s")
+
+            // Fetch children for each friend who has the app
+            var friendsWithChildren: [CKFriend] = []
+            var itemCounts: [String: Int] = [:]
+
+            for record in records {
+                let friendRecordID = record["friendUserRecordID"] as? String
+                var children: [CKChild] = []
+
+                if let friendRecordID = friendRecordID, !friendRecordID.isEmpty {
+                    let childFetchStart = Date()
+                    do {
+                        let childRecords = try await fetchChildrenForUser(userRecordID: friendRecordID)
+                        children = childRecords.map { CKChild(from: $0) }
+                        print("⏱️ [PRELOAD] Fetched \(children.count) children for friend in \(Date().timeIntervalSince(childFetchStart).formatted())s")
+                    } catch let error as CKError where error.code == .unknownItem {
+                        print("☁️ [PRELOAD] Child record type not created yet")
+                        children = []
+                    } catch {
+                        print("❌ [PRELOAD] Error fetching children: \(error)")
+                    }
+                }
+
+                friendsWithChildren.append(CKFriend(from: record, children: children))
+            }
+
+            // Fetch item counts for friends and children
+            for friend in friendsWithChildren where friend.hasApp {
+                guard let friendRecordID = friend.friendUserRecordID else { continue }
+
+                // Load item count for friend
+                do {
+                    let items = try await fetchFriendWishlistItems(friendRecordID: friendRecordID)
+                    itemCounts[friendRecordID] = items.count
+                } catch {
+                    print("❌ [PRELOAD] Error loading item count for \(friend.name): \(error)")
+                }
+
+                // Load item counts for friend's children
+                for child in friend.children {
+                    do {
+                        let items = try await fetchFriendWishlistItems(friendRecordID: child.id)
+                        itemCounts[child.id] = items.count
+                    } catch {
+                        print("❌ [PRELOAD] Error loading item count for \(child.name): \(error)")
+                    }
+                }
+            }
+
+            // Update cached data on main actor
+            cachedFriends = friendsWithChildren
+            cachedFriendItemCounts = itemCounts
+
+            print("⏱️ [PRELOAD] Completed in \(Date().timeIntervalSince(startTime).formatted())s - cached \(friendsWithChildren.count) friends")
+        } catch {
+            print("❌ [PRELOAD] Failed after \(Date().timeIntervalSince(startTime).formatted())s: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Children

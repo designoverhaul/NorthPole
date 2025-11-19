@@ -15,16 +15,29 @@ private let logger = Logger(subsystem: "com.designoverhaul.ChristmasWishlist", c
 @main
 struct ChristmasWishlistApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @State private var hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     var body: some Scene {
-        WindowGroup {
-            if hasCompletedOnboarding {
-                MainTabView()
-                    .preferredColorScheme(.light) // Force light mode only
-            } else {
-                OnboardingView(isCompleted: $hasCompletedOnboarding)
-                    .preferredColorScheme(.light) // Force light mode only
+        let _ = print("🎄 [APP] Body evaluated - hasCompletedOnboarding = \(hasCompletedOnboarding)")
+
+        return WindowGroup {
+            Group {
+                if hasCompletedOnboarding {
+                    MainTabView()
+                        .preferredColorScheme(.light)
+                        .onAppear {
+                            print("🎄 [APP] ✅ MainTabView appeared - SUCCESS!")
+                        }
+                } else {
+                    OnboardingView(isCompleted: $hasCompletedOnboarding)
+                        .preferredColorScheme(.light)
+                        .onAppear {
+                            print("🎄 [APP] OnboardingView appeared - hasCompletedOnboarding = \(hasCompletedOnboarding)")
+                        }
+                }
+            }
+            .onChange(of: hasCompletedOnboarding) { oldValue, newValue in
+                print("🎄 [APP] ⚡ hasCompletedOnboarding changed from \(oldValue) to \(newValue)")
             }
         }
     }
@@ -88,6 +101,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                 // Start polling as a fallback (in case push notifications don't work)
                 // Poll every 30 seconds to check for new purchases
                 cloudKit.startPurchasePolling(interval: 30)
+
+                // Preload friends data in background for instant display
+                print("🚀 [APP] Starting friends preload...")
+                await cloudKit.preloadFriendsData()
             } catch {
                 logger.error("Failed to subscribe to CloudKit changes: \(error.localizedDescription)")
             }

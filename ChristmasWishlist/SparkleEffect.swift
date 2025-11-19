@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import CoreMotion
 
 // MARK: - Sparkle Particle
 struct SparkleParticle: Identifiable {
@@ -15,6 +16,7 @@ struct SparkleParticle: Identifiable {
     var scale: CGFloat
     var opacity: Double
     var delay: Double
+    var depth: CGFloat // Depth layer for parallax effect (0.5 = background, 1.5 = foreground)
 }
 
 // MARK: - Sparkle Effect View
@@ -23,6 +25,7 @@ struct SparkleEffect: View {
     @State private var particles: [SparkleParticle] = []
     @State private var animate = false
     @State private var twinkle = false
+    @StateObject private var motionManager = MotionManager()
 
     init(particleCount: Int = 12) {
         self.particleCount = particleCount
@@ -32,6 +35,10 @@ struct SparkleEffect: View {
         GeometryReader { geometry in
             ZStack {
                 ForEach(particles) { particle in
+                    // Calculate parallax offset based on device motion and particle depth
+                    let parallaxX = motionManager.roll * 10 * particle.depth
+                    let parallaxY = motionManager.pitch * 10 * particle.depth
+
                     // Star shape for sparkle effect
                     Image(systemName: "star.fill")
                         .foregroundStyle(
@@ -42,7 +49,10 @@ struct SparkleEffect: View {
                             )
                         )
                         .font(.system(size: 8 * particle.scale))
-                        .position(x: particle.x, y: particle.y)
+                        .position(
+                            x: particle.x + parallaxX,
+                            y: particle.y + parallaxY
+                        )
                         .opacity(twinkle ? particle.opacity : 0.2)
                         .scaleEffect(twinkle ? 1.2 : 0.6)
                         .rotationEffect(.degrees(twinkle ? 180 : 0))
@@ -52,6 +62,8 @@ struct SparkleEffect: View {
                             .delay(particle.delay),
                             value: twinkle
                         )
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: motionManager.roll)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: motionManager.pitch)
                         .shadow(color: .white.opacity(0.8), radius: 4)
                 }
             }
@@ -69,7 +81,8 @@ struct SparkleEffect: View {
                 y: CGFloat.random(in: 0...size.height),
                 scale: CGFloat.random(in: 0.5...1.5),
                 opacity: Double.random(in: 0.3...0.8),
-                delay: Double.random(in: 0...1.0)
+                delay: Double.random(in: 0...1.0),
+                depth: CGFloat.random(in: 0.5...1.5) // Varying depth creates layered parallax
             )
         }
     }

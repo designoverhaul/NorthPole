@@ -18,6 +18,7 @@ struct FriendsListView: View {
     @State private var errorMessage: String?
     @State private var showingError = false
     @State private var hasLoadedOnce = false
+    @State private var hasInitializedFromCache = false
 
     @State private var showingContactPicker = false
     @State private var contactPermissionStatus: CNAuthorizationStatus = .notDetermined
@@ -34,7 +35,11 @@ struct FriendsListView: View {
 
                 VStack(spacing: 0) {
                     if friends.isEmpty {
-                        emptyStateView
+                        if isLoading || cloudKit.isPreloadingFriends {
+                            loadingStateView
+                        } else {
+                            emptyStateView
+                        }
                     } else {
                         ScrollView {
                             LazyVStack(spacing: Spacing.md) {
@@ -110,6 +115,16 @@ struct FriendsListView: View {
             }
             .onAppear {
                 checkContactPermission()
+
+                // Initialize from cache on first appearance
+                if !hasInitializedFromCache && !cloudKit.cachedFriends.isEmpty {
+                    print("📋 [FRIENDS] Initializing from cache (\(cloudKit.cachedFriends.count) friends)")
+                    friends = cloudKit.cachedFriends
+                    friendItemCounts = cloudKit.cachedFriendItemCounts
+                    hasInitializedFromCache = true
+                    hasLoadedOnce = true
+                }
+
                 // Load friends on appear if CloudKit is ready and we haven't loaded yet
                 if !hasLoadedOnce && cloudKit.isSignedInToiCloud {
                     Task {
@@ -156,6 +171,18 @@ struct FriendsListView: View {
                     await loadFriends()
                 }
             }
+            .onChange(of: cloudKit.isPreloadingFriends) { oldValue, newValue in
+                // When preloading completes, update UI with cached data
+                if oldValue && !newValue && !hasInitializedFromCache && !cloudKit.cachedFriends.isEmpty {
+                    print("📋 [FRIENDS] Updating from newly populated cache (\(cloudKit.cachedFriends.count) friends)")
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        friends = cloudKit.cachedFriends
+                        friendItemCounts = cloudKit.cachedFriendItemCounts
+                    }
+                    hasInitializedFromCache = true
+                    hasLoadedOnce = true
+                }
+            }
             .sheet(item: $friendToInvite) { friend in
                 ShareSheet(activityItems: [createInviteMessage(for: friend)])
             }
@@ -185,6 +212,22 @@ struct FriendsListView: View {
                 .font(.bodyMedium)
                 .foregroundColor(.warmGray)
                 .multilineTextAlignment(.center)
+
+            Spacer()
+        }
+    }
+
+    private var loadingStateView: some View {
+        VStack(spacing: Spacing.lg) {
+            Spacer()
+
+            ProgressView()
+                .scaleEffect(1.5)
+                .tint(.forestGreen)
+
+            Text("Loading friends...")
+                .font(.bodyMedium)
+                .foregroundColor(.warmGray)
 
             Spacer()
         }
@@ -438,7 +481,6 @@ struct FriendsListView: View {
     }
 
     private func createInviteMessage(for friend: CKFriend) -> String {
-        let firstName = String(friend.name.split(separator: " ").first ?? "")
         return """
         I have a wishlist here if you are interested. I would like to see yours as well. Get the list here:
 

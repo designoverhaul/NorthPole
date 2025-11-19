@@ -168,7 +168,7 @@ struct AskSantaView: View {
                 // Age Input
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     Text("Age")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.warmBlack)
 
                     TextField("Enter age", text: $age)
@@ -186,8 +186,8 @@ struct AskSantaView: View {
 
                 // Sex Picker
                 VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("Sex")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    Text("Gender")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.warmBlack)
 
                     Menu {
@@ -229,7 +229,7 @@ struct AskSantaView: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 HStack {
                     Text("Budget")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.warmBlack)
 
                     Spacer()
@@ -268,7 +268,7 @@ struct AskSantaView: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 HStack {
                     Text("Gift Type")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.warmBlack)
 
                     Spacer()
@@ -305,7 +305,7 @@ struct AskSantaView: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 HStack {
                     Text("Interests")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.warmBlack)
 
                     Spacer()
