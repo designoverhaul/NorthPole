@@ -10,19 +10,14 @@ import CloudKit
 
 struct SettingsView: View {
     @StateObject private var cloudKit = CloudKitManager.shared
-    @AppStorage("userName") private var name = ""
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("showPurchasedItems") private var showPurchasedItems = true
     @State private var showingPermissionAlert = false
-    @State private var isSavingName = false
-    @State private var hasLoadedName = false
-    @State private var showingDemoDataAlert = false
-    @State private var showingLoadDemoDataAlert = false
     @State private var showingErrorAlert = false
     @State private var errorAlertMessage = ""
     @State private var showingSuccessAlert = false
     @State private var successAlertMessage = ""
-    @FocusState private var nameFieldFocused: Bool
+    @State private var showingOnboarding = false
 
     var isActive: Bool = true
 
@@ -35,34 +30,9 @@ struct SettingsView: View {
             ZStack {
                 Color.creamBackground
                     .ignoresSafeArea()
-                    .onTapGesture {
-                        nameFieldFocused = false
-                    }
 
                 Form {
                     Section {
-                        HStack {
-                            Text("Name")
-                                .foregroundColor(.warmBlack)
-                            Spacer()
-                            TextField("Your name", text: $name)
-                                .multilineTextAlignment(.trailing)
-                                .foregroundColor(.warmBlack)
-                                .focused($nameFieldFocused)
-                                .submitLabel(.done)
-                                .onSubmit {
-                                    nameFieldFocused = false
-                                }
-                                .onChange(of: name) { oldValue, newValue in
-                                    saveNameToCloudKit(newValue)
-                                }
-                            if isSavingName {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                            }
-                        }
-                        .listRowBackground(Color.creamCard)
-
                         NavigationLink {
                             ManageChildrenView()
                         } label: {
@@ -94,9 +64,8 @@ struct SettingsView: View {
                             .foregroundColor(.warmBlack)
                             .listRowBackground(Color.creamCard)
                             .onChange(of: notificationsEnabled) { oldValue, newValue in
-                                if newValue {
-                                    requestNotificationPermissions()
-                                }
+                                // Always check/request permissions when toggled
+                                requestNotificationPermissions(userToggledOn: newValue)
                             }
                     } header: {
                         Text("Secrecy")
@@ -108,7 +77,10 @@ struct SettingsView: View {
                     }
 
                     Section {
-                        Button(action: rateApp) {
+                        Button(action: {
+                            HapticManager.buttonTapped()
+                            ReviewManager.shared.requestReviewManually()
+                        }) {
                             HStack {
                                 Image(systemName: "star.fill")
                                     .foregroundColor(.gold)
@@ -146,44 +118,54 @@ struct SettingsView: View {
                     }
 
                     Section {
-                        NavigationLink {
-                            ImportLogsView()
-                        } label: {
+                        Button(action: { showingOnboarding = true }) {
                             HStack {
-                                Image(systemName: "doc.text.magnifyingglass")
-                                    .foregroundColor(.forestGreen)
-                                Text("Import Logs")
-                                    .foregroundColor(.warmBlack)
-                            }
-                        }
-                        .listRowBackground(Color.creamCard)
-
-                        Button(action: { showingLoadDemoDataAlert = true }) {
-                            HStack {
-                                Image(systemName: "person.3.fill")
+                                Image(systemName: "play.circle.fill")
                                     .foregroundColor(.gold)
-                                Text("Load Demo Data")
+                                Text("View Onboarding Tutorial")
                                     .foregroundColor(.warmBlack)
                                 Spacer()
                             }
                         }
                         .listRowBackground(Color.creamCard)
 
-                        Button(action: { showingDemoDataAlert = true }) {
+                        Button(action: checkSubscriptions) {
                             HStack {
-                                Image(systemName: "trash.fill")
-                                    .foregroundColor(.red)
-                                Text("Clear All Data")
-                                    .foregroundColor(.red)
+                                Image(systemName: "bell.badge.fill")
+                                    .foregroundColor(.forestGreen)
+                                Text("Check Notification Subscriptions")
+                                    .foregroundColor(.warmBlack)
+                                Spacer()
+                            }
+                        }
+                        .listRowBackground(Color.creamCard)
+
+                        Button(action: resubscribeToNotifications) {
+                            HStack {
+                                Image(systemName: "arrow.clockwise.circle.fill")
+                                    .foregroundColor(.gold)
+                                Text("Reset Notification Subscriptions")
+                                    .foregroundColor(.warmBlack)
+                                Spacer()
+                            }
+                        }
+                        .listRowBackground(Color.creamCard)
+
+                        Button(action: testLocalNotification) {
+                            HStack {
+                                Image(systemName: "bell.fill")
+                                    .foregroundColor(.gold)
+                                Text("Test Local Notification")
+                                    .foregroundColor(.warmBlack)
                                 Spacer()
                             }
                         }
                         .listRowBackground(Color.creamCard)
                     } header: {
-                        Text("Debugging")
+                        Text("Developer")
                             .foregroundColor(.forestGreen)
                     } footer: {
-                        Text("Load sample friends and wishlists for testing. Clear all data will delete everything.")
+                        Text("View the onboarding tutorial again for testing purposes. Check or reset CloudKit notification subscriptions if you're not receiving purchase notifications.")
                             .foregroundColor(.warmGray)
                             .font(.caption)
                     }
@@ -240,22 +222,6 @@ struct SettingsView: View {
             } message: {
                 Text("Notification permissions were denied. Please enable them in Settings to receive purchase notifications.")
             }
-            .alert("Clear All Data?", isPresented: $showingDemoDataAlert) {
-                Button("Delete Everything", role: .destructive) {
-                    clearAllData()
-                }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("This will permanently delete all friends, wishlists, and children. This action cannot be undone.")
-            }
-            .alert("Load Demo Data?", isPresented: $showingLoadDemoDataAlert) {
-                Button("Load Demo Data", role: .none) {
-                    loadDemoData()
-                }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("This will create sample friends and wishlists for testing. If you've already loaded demo data, this will create duplicates. Consider clearing all data first.")
-            }
             .alert("Error", isPresented: $showingErrorAlert) {
                 Button("OK", role: .cancel) { }
             } message: {
@@ -266,61 +232,45 @@ struct SettingsView: View {
             } message: {
                 Text(successAlertMessage)
             }
-            .onChange(of: isActive) { _, active in
-                if active && !hasLoadedName && cloudKit.isSignedInToiCloud {
-                    loadNameFromCloudKit()
-                    hasLoadedName = true
-                }
-            }
-            .onChange(of: cloudKit.isSignedInToiCloud) { _, isSignedIn in
-                // Load user name immediately when CloudKit is ready
-                if isSignedIn && !hasLoadedName {
-                    loadNameFromCloudKit()
-                    hasLoadedName = true
-                }
+            .fullScreenCover(isPresented: $showingOnboarding) {
+                OnboardingView(isCompleted: $showingOnboarding)
             }
         }
     }
 
     // MARK: - Functions
 
-    private func loadNameFromCloudKit() {
-        guard cloudKit.isSignedInToiCloud else { return }
-
+    private func requestNotificationPermissions(userToggledOn: Bool) {
         Task {
-            do {
-                if let cloudName = try await cloudKit.fetchUserProfile() {
-                    name = cloudName
-                }
-            } catch {
-                print("❌ Error loading user profile: \(error)")
-            }
-        }
-    }
+            // First check current status
+            let status = await NotificationManager.shared.checkAuthorizationStatus()
 
-    private func saveNameToCloudKit(_ newName: String) {
-        guard cloudKit.isSignedInToiCloud else { return }
-        guard !newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            if status == .notDetermined {
+                // Never asked before - request now
+                print("📱 [SETTINGS] Requesting notification permissions for first time...")
+                let granted = await NotificationManager.shared.requestAuthorization()
 
-        isSavingName = true
-
-        Task {
-            do {
-                try await cloudKit.saveUserProfile(name: newName.trimmingCharacters(in: .whitespacesAndNewlines))
-                isSavingName = false
-            } catch {
-                print("❌ Error saving user profile: \(error)")
-                isSavingName = false
-            }
-        }
-    }
-
-    private func requestNotificationPermissions() {
-        Task {
-            let granted = await NotificationManager.shared.requestAuthorization()
-            if !granted {
                 await MainActor.run {
+                    if !granted {
+                        // User denied - turn toggle back off
+                        notificationsEnabled = false
+                        showingPermissionAlert = true
+                    } else {
+                        print("✅ [SETTINGS] User granted notification permissions")
+                    }
+                }
+            } else if status == .denied {
+                // User previously denied - need to go to Settings
+                print("⚠️ [SETTINGS] Notifications denied - need to enable in iOS Settings")
+                await MainActor.run {
+                    notificationsEnabled = false
                     showingPermissionAlert = true
+                }
+            } else if status == .authorized {
+                // Already authorized - just update the preference
+                print("✅ [SETTINGS] Notifications already authorized")
+                await MainActor.run {
+                    notificationsEnabled = userToggledOn
                 }
             }
         }
@@ -373,73 +323,60 @@ struct SettingsView: View {
         }
     }
 
-    private func loadDemoData() {
+    private func checkSubscriptions() {
         Task {
             do {
-                try await CloudKitDemoDataGenerator.generateDemoData()
+                let subscriptions = try await cloudKit.fetchAllSubscriptions()
                 await MainActor.run {
-                    HapticManager.itemAdded()
-                    successAlertMessage = "Demo data loaded successfully! Go to the Friends tab to see Sarah and her children's wishlists."
-                    showingSuccessAlert = true
-                }
-            } catch let ckError as CKError {
-                print("❌ Error loading demo data: \(ckError)")
-                await MainActor.run {
-                    HapticManager.errorOccurred()
-                    errorAlertMessage = ckError.userFriendlyMessage
-                    showingErrorAlert = true
-                }
-            } catch CloudKitError.notSignedIn {
-                print("❌ Error loading demo data: Not signed in")
-                await MainActor.run {
-                    HapticManager.errorOccurred()
-                    errorAlertMessage = "Please sign in to iCloud in Settings to use this feature."
-                    showingErrorAlert = true
+                    if subscriptions.isEmpty {
+                        errorAlertMessage = "No active CloudKit subscriptions found. This might be why you're not receiving notifications. Try 'Reset Notification Subscriptions'."
+                        showingErrorAlert = true
+                    } else {
+                        let subscriptionList = subscriptions.map { "• \($0.subscriptionID)" }.joined(separator: "\n")
+                        successAlertMessage = "Found \(subscriptions.count) active subscription(s):\n\n\(subscriptionList)"
+                        showingSuccessAlert = true
+                    }
                 }
             } catch {
-                print("❌ Error loading demo data: \(error)")
                 await MainActor.run {
-                    HapticManager.errorOccurred()
-                    errorAlertMessage = "Failed to load demo data: \(error.localizedDescription)"
+                    errorAlertMessage = "Failed to check subscriptions: \(error.localizedDescription)"
                     showingErrorAlert = true
                 }
             }
         }
     }
 
-    private func clearAllData() {
+    private func resubscribeToNotifications() {
         Task {
             do {
-                try await CloudKitDemoDataGenerator.clearAllData()
+                try await cloudKit.resubscribeToAll()
                 await MainActor.run {
-                    HapticManager.buttonTapped()
-                    successAlertMessage = "All data has been cleared successfully."
+                    successAlertMessage = "Successfully reset notification subscriptions! You should now receive notifications when friends purchase your items."
                     showingSuccessAlert = true
                 }
-            } catch let ckError as CKError {
-                print("❌ Error clearing data: \(ckError)")
-                await MainActor.run {
-                    HapticManager.errorOccurred()
-                    errorAlertMessage = ckError.userFriendlyMessage
-                    showingErrorAlert = true
-                }
-            } catch CloudKitError.notSignedIn {
-                print("❌ Error clearing data: Not signed in")
-                await MainActor.run {
-                    HapticManager.errorOccurred()
-                    errorAlertMessage = "Please sign in to iCloud in Settings to use this feature."
-                    showingErrorAlert = true
-                }
             } catch {
-                print("❌ Error clearing data: \(error)")
                 await MainActor.run {
-                    HapticManager.errorOccurred()
-                    errorAlertMessage = "Failed to clear data: \(error.localizedDescription)"
+                    errorAlertMessage = "Failed to reset subscriptions: \(error.localizedDescription)"
                     showingErrorAlert = true
                 }
             }
         }
     }
+
+    private func testLocalNotification() {
+        Task {
+            print("🧪 [TEST] Triggering test notification...")
+            await NotificationManager.shared.sendItemPurchasedNotification(
+                itemName: "Test Item",
+                friendName: "Test Friend"
+            )
+            await MainActor.run {
+                successAlertMessage = "Test notification sent! If you don't see a notification banner, check Settings → Notifications → Listmas and ensure notifications are enabled."
+                showingSuccessAlert = true
+            }
+        }
+    }
+
 }
 
 #Preview {

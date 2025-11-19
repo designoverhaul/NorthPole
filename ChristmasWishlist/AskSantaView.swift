@@ -4,6 +4,12 @@
 //
 //  Created by Claude Code
 //
+//  ⚠️ IMPORTANT: This view has multiple keyboard dismissal methods for the number pad
+//  The number pad doesn't have a built-in dismiss button, so we provide:
+//  1. Keyboard toolbar "Done" button (above keyboard)
+//  2. Scroll-to-dismiss functionality
+//  3. Tap-background-to-dismiss
+//  DO NOT REMOVE these methods - they are essential for good UX
 
 import SwiftUI
 
@@ -16,10 +22,13 @@ struct AskSantaView: View {
     @State private var age: String = ""
     @State private var selectedInterests: Set<String> = []
     @State private var selectedSex: Sex = .either
+    @State private var budget: Double = 100 // $20 - $500
+    @State private var educationalLevel: Double = 0.5 // 0 = Fun, 1 = Educational
 
     // Results
     @State private var suggestions: [GiftSuggestion] = []
     @State private var hasSearched = false
+    @State private var snowflakeRotation: Double = 0
 
     // Available interest categories
     private let interests = [
@@ -39,9 +48,13 @@ struct AskSantaView: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                // ⚠️ CRITICAL: Tap background to dismiss keyboard
+                // DO NOT REMOVE - Allows users to dismiss by tapping outside the text field
                 Color.creamBackground.ignoresSafeArea()
                     .onTapGesture {
-                        isAgeFieldFocused = false
+                        withAnimation {
+                            isAgeFieldFocused = false
+                        }
                     }
 
                 ScrollView {
@@ -49,8 +62,10 @@ struct AskSantaView: View {
                         // Santa Header - always show
                         santaHeader
 
-                        // Show input form only if no results or empty results
-                        if !hasSearched || (hasSearched && suggestions.isEmpty) {
+                        // Loading takes priority - show it in place of input form
+                        if xaiService.isLoading {
+                            loadingView
+                        } else if !hasSearched || (hasSearched && suggestions.isEmpty) {
                             // Input Form
                             inputSection
 
@@ -58,10 +73,8 @@ struct AskSantaView: View {
                             searchButton
                         }
 
-                        // Results Section
-                        if xaiService.isLoading {
-                            loadingView
-                        } else if hasSearched {
+                        // Results Section (only show when not loading)
+                        if !xaiService.isLoading && hasSearched {
                             if suggestions.isEmpty {
                                 emptyStateView
                             } else {
@@ -74,6 +87,9 @@ struct AskSantaView: View {
                     }
                     .padding(Spacing.lg)
                 }
+                // ⚠️ CRITICAL: Enable scroll-to-dismiss keyboard
+                // DO NOT REMOVE - Allows users to dismiss keyboard by scrolling
+                .scrollDismissesKeyboard(.interactively)
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -99,12 +115,22 @@ struct AskSantaView: View {
                     }
                 }
 
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") {
-                        isAgeFieldFocused = false
+                // ⚠️ CRITICAL: Done button above keyboard (iOS standard position)
+                // DO NOT REMOVE - Primary method to dismiss number pad
+                if isAgeFieldFocused {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button(action: {
+                            withAnimation {
+                                isAgeFieldFocused = false
+                            }
+                            HapticManager.buttonTapped()
+                        }) {
+                            Text("Done")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Color.forestGreen)
+                        }
                     }
-                    .foregroundStyle(Color.forestGreen)
                 }
             }
             .toolbarBackground(Color.creamBackground, for: .navigationBar)
@@ -121,7 +147,7 @@ struct AskSantaView: View {
                     .scaledToFit()
                     .frame(maxWidth: geometry.size.width * 0.6)
 
-                Text("I know exactly what people are asking for.")
+                Text("I know what people want in 2025! ")
                     .font(.custom("Caveat", size: 27))
                     .foregroundStyle(Color.warmBlack)
                     .multilineTextAlignment(.center)
@@ -199,11 +225,95 @@ struct AskSantaView: View {
                 .frame(maxWidth: .infinity)
             }
 
+            // Budget Slider
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack {
+                    Text("Budget")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.warmBlack)
+
+                    Spacer()
+
+                    Text("$\(Int(budget))")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(Color.forestGreen)
+                }
+
+                HStack(spacing: Spacing.sm) {
+                    Text("$25")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.warmGray)
+
+                    Slider(value: $budget, in: 25...250, step: 5)
+                        .tint(Color.forestGreen)
+                        .onChange(of: budget) { _, _ in
+                            HapticManager.selection()
+                        }
+
+                    Text("$250")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.warmGray)
+                }
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.md)
+                .background(Color.creamCard)
+                .cornerRadius(CornerRadius.md)
+                .overlay(
+                    RoundedRectangle(cornerRadius: CornerRadius.md)
+                        .stroke(Color.warmGrayLight, lineWidth: 1)
+                )
+            }
+
+            // Educational Level Slider
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack {
+                    Text("Gift Type")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.warmBlack)
+
+                    Spacer()
+
+                    Text(educationalLevelLabel)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(Color.forestGreen)
+                }
+
+                HStack(spacing: Spacing.sm) {
+                    Text("🎮")
+                        .font(.system(size: 20))
+
+                    Slider(value: $educationalLevel, in: 0...1, step: 0.25)
+                        .tint(Color.forestGreen)
+                        .onChange(of: educationalLevel) { _, _ in
+                            HapticManager.selection()
+                        }
+
+                    Text("📚")
+                        .font(.system(size: 20))
+                }
+                .padding(.horizontal, Spacing.sm)
+                .padding(.vertical, Spacing.md)
+                .background(Color.creamCard)
+                .cornerRadius(CornerRadius.md)
+                .overlay(
+                    RoundedRectangle(cornerRadius: CornerRadius.md)
+                        .stroke(Color.warmGrayLight, lineWidth: 1)
+                )
+            }
+
             // Interests
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text("Interests")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.warmBlack)
+                HStack {
+                    Text("Interests")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.warmBlack)
+
+                    Spacer()
+
+                    Text("\(selectedInterests.count)/3")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundStyle(selectedInterests.count >= 3 ? Color.forestGreen : Color.warmGray)
+                }
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: Spacing.sm) {
                     ForEach(interests, id: \.self) { interest in
@@ -253,9 +363,18 @@ struct AskSantaView: View {
     // MARK: - Loading View
     private var loadingView: some View {
         VStack(spacing: Spacing.md) {
-            ProgressView()
-                .scaleEffect(1.5)
-                .tint(Color.forestGreen)
+            Text("❄️")
+                .font(.system(size: 60))
+                .rotationEffect(.degrees(snowflakeRotation))
+                .onAppear {
+                    snowflakeRotation = 0
+                    withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
+                        snowflakeRotation = 360
+                    }
+                }
+                .onDisappear {
+                    snowflakeRotation = 0
+                }
 
             Text("Santa's elves are searching...")
                 .font(.bodyLarge)
@@ -310,13 +429,34 @@ struct AskSantaView: View {
         return true
     }
 
+    private var educationalLevelLabel: String {
+        switch educationalLevel {
+        case 0.0:
+            return "Fun & Entertainment"
+        case 0.25:
+            return "Mostly Fun"
+        case 0.5:
+            return "Balanced"
+        case 0.75:
+            return "Mostly Educational"
+        case 1.0:
+            return "Highly Educational"
+        default:
+            return "Balanced"
+        }
+    }
+
     private func toggleInterest(_ interest: String) {
         if selectedInterests.contains(interest) {
             selectedInterests.remove(interest)
-        } else {
+            HapticManager.selection()
+        } else if selectedInterests.count < 3 {
             selectedInterests.insert(interest)
+            HapticManager.selection()
+        } else {
+            // Already have 3 interests selected - can't add more
+            HapticManager.errorOccurred()
         }
-        HapticManager.selection()
     }
 
     private func performSearch() {
@@ -336,7 +476,9 @@ struct AskSantaView: View {
             let newSuggestions = await xaiService.generateGiftSuggestions(
                 age: ageValue,
                 interests: Array(selectedInterests),
-                sex: selectedSex.rawValue
+                sex: selectedSex.rawValue,
+                budget: budget,
+                educationalLevel: educationalLevel
             )
 
             if isAppending {

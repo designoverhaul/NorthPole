@@ -30,7 +30,7 @@ class XAIService: ObservableObject {
     private init() {}
 
     // MARK: - Generate Gift Suggestions
-    func generateGiftSuggestions(age: Int, interests: [String], sex: String) async -> [GiftSuggestion] {
+    func generateGiftSuggestions(age: Int, interests: [String], sex: String, budget: Double = 100, educationalLevel: Double = 0.5) async -> [GiftSuggestion] {
         isLoading = true
         errorMessage = nil
 
@@ -40,18 +40,40 @@ class XAIService: ObservableObject {
         let interestsText = interests.isEmpty ? "general interests" : interests.joined(separator: ", ")
         let sexText = sex == "Either" ? "anyone" : "a \(sex.lowercased()) person"
         let interestsGuidance = interests.isEmpty ? "" : " The user has indicated interest in \(interestsText), but you may suggest products beyond these categories."
+        let budgetGuidance = " The budget is around $\(Int(budget)) per gift."
+
+        // Educational level guidance
+        let educationalGuidance: String
+        switch educationalLevel {
+        case 0.0:
+            educationalGuidance = " Focus HEAVILY on fun, entertainment, games, toys, and recreational items. Avoid educational products."
+        case 0.25:
+            educationalGuidance = " Lean towards fun and entertaining gifts, but you may include a few items that have subtle learning aspects."
+        case 0.5:
+            educationalGuidance = " Balance between fun/entertainment and educational value. Include a mix of both types of products."
+        case 0.75:
+            educationalGuidance = " Lean towards educational gifts, STEM products, and items that develop skills, but you may include some fun elements."
+        case 1.0:
+            educationalGuidance = " Focus HEAVILY on educational products, STEM toys, learning resources, skill-building items, and intellectually stimulating gifts. Prioritize learning and development."
+        default:
+            educationalGuidance = " Balance between fun/entertainment and educational value."
+        }
+
         let prompt = """
-        You are a helpful gift advisor. Generate exactly 10 creative and thoughtful gift suggestions for \(sexText) who is \(age) years old.\(interestsGuidance)
+        You are a helpful gift advisor. Generate exactly 10 creative and thoughtful gift suggestions for \(sexText) who is \(age) years old.\(budgetGuidance)\(interestsGuidance)\(educationalGuidance)
 
         CRITICAL REQUIREMENTS:
         - ALL products MUST be REAL products that actually exist and can be purchased
         - Do NOT create fictional or made-up items
-        - Suggest products that are genuinely popular with people in this age group
+        - prioritize products that may be trending. Hot popular items that may be mentioned on on Twitter.
         - You are not limited to the interest categories - suggest any appropriate real products
+        - Respect the educational preference specified above
+        - Note the budget above. If it's high you may wanna look for a higher priced items.
 
         For each gift, provide:
         1. The gift name (should be a real product name)
         2. A 1-2 sentence description explaining why it's a great gift for this age group
+        3. One appropriate emoji
 
         Format your response as a JSON array with this structure:
         [
@@ -175,7 +197,12 @@ class XAIService: ObservableObject {
 
     // MARK: - Open Google Shopping Search
     static func searchGoogleShopping(for giftName: String) {
-        let searchQuery = giftName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        // Use a custom character set that properly encodes spaces and special characters
+        // .urlQueryAllowed is too permissive and can leave characters that break query parsing
+        var allowedCharacters = CharacterSet.alphanumerics
+        allowedCharacters.insert(charactersIn: "-._~") // RFC 3986 unreserved characters
+
+        let searchQuery = giftName.addingPercentEncoding(withAllowedCharacters: allowedCharacters) ?? ""
         let urlString = "https://www.google.com/search?tbm=shop&q=\(searchQuery)"
 
         if let url = URL(string: urlString) {

@@ -12,21 +12,21 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            CloudKitWishlistView(isActive: selectedTab == 0)
+            AskSantaView(isActive: .constant(selectedTab == 0))
                 .tabItem {
-                    Label("My Wishlist", systemImage: "gift")
+                    Label("Ask Santa", systemImage: "sparkles")
                 }
                 .tag(0)
 
-            FriendsListView(isActive: selectedTab == 1)
+            CloudKitWishlistView(isActive: selectedTab == 1)
                 .tabItem {
-                    Label("Friends", systemImage: "person.2")
+                    Label("My Wishlist", systemImage: "gift")
                 }
                 .tag(1)
 
-            AskSantaView(isActive: .constant(selectedTab == 2))
+            FriendsListView(isActive: selectedTab == 2)
                 .tabItem {
-                    Label("Ask Santa", systemImage: "sparkles")
+                    Label("Friends", systemImage: "person.2")
                 }
                 .tag(2)
 

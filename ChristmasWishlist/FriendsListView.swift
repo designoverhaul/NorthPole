@@ -21,8 +21,7 @@ struct FriendsListView: View {
 
     @State private var showingContactPicker = false
     @State private var contactPermissionStatus: CNAuthorizationStatus = .notDetermined
-    @State private var showingShareSheet = false
-    @State private var selectedFriend: CKFriend?
+    @State private var friendToInvite: CKFriend?
     @State private var refreshTask: Task<Void, Never>?
 
     var isActive: Bool = true
@@ -95,7 +94,7 @@ struct FriendsListView: View {
                                 HapticManager.buttonTapped()
                                 requestContactsAccess()
                             },
-                            icon: "person.badge.plus"
+                            icon: "plus"
                         )
                         .sparkle(isActive: true)
                         .padding(Spacing.lg)
@@ -157,10 +156,8 @@ struct FriendsListView: View {
                     await loadFriends()
                 }
             }
-            .sheet(isPresented: $showingShareSheet) {
-                if let friend = selectedFriend {
-                    ShareSheet(activityItems: [createInviteMessage(for: friend)])
-                }
+            .sheet(item: $friendToInvite) { friend in
+                ShareSheet(activityItems: [createInviteMessage(for: friend)])
             }
             .alert("Error", isPresented: $showingError) {
                 Button("OK", role: .cancel) { }
@@ -294,8 +291,11 @@ struct FriendsListView: View {
                     friendUserRecordID: friendUserRecordID
                 )
 
-                // Small delay for CloudKit consistency
-                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                // Delay for CloudKit consistency - increased to ensure propagation on new devices
+                try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+
+                // Track for review prompt (after first friend)
+                ReviewManager.shared.markFirstFriendAdded()
 
                 // Reload friends
                 await loadFriends()
@@ -434,8 +434,7 @@ struct FriendsListView: View {
 
     private func inviteFriend(_ friend: CKFriend) {
         HapticManager.buttonTapped()
-        selectedFriend = friend
-        showingShareSheet = true
+        friendToInvite = friend
     }
 
     private func createInviteMessage(for friend: CKFriend) -> String {

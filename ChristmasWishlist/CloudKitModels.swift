@@ -97,20 +97,6 @@ struct CKFriend: Identifiable {
     }
 }
 
-// MARK: - CloudKit User
-
-struct CKUser: Identifiable {
-    let id: String
-    let record: CKRecord
-    var name: String
-
-    init(from record: CKRecord) {
-        self.record = record
-        self.id = record.recordID.recordName
-        self.name = record["name"] as? String ?? ""
-    }
-}
-
 // MARK: - CloudKit Child
 
 struct CKChild: Identifiable {

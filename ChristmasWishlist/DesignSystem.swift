@@ -97,6 +97,18 @@ struct DesignShadow {
     static let strong = Color.warmGray.opacity(0.2)
 }
 
+// MARK: - Christmas Emoji Collection
+enum ChristmasEmojis {
+    static let all = ["🔔", "🎁", "👶", "🕯️", "🎅", "👼", "🎶", "🤶", "❄️", "☃️", "⛄", "🌟", "🔥", "🎄", "🍷", "🦌", "🍪", "🥛", "🧝‍♀️", "🧦", "🧑‍🎄", "🧝", "🌨️", "⭐", "🍰", "🍫", "🍬"]
+
+    /// Returns a consistent Christmas emoji for a given seed string (e.g., name or ID)
+    static func emoji(for seed: String) -> String {
+        let hash = abs(seed.hashValue)
+        let index = hash % all.count
+        return all[index]
+    }
+}
+
 // MARK: - Gold Gradient Title
 struct GoldGradientTitle: ViewModifier {
     let text: String

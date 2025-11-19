@@ -118,11 +118,17 @@ struct CloudKitAddGiftView: View {
                                 }) {
                                     Text("Paste")
                                         .font(.bodyMedium)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(UIPasteboard.general.hasStrings ? .forestGreen : .warmGrayLight)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.white)
                                         .padding(.horizontal, Spacing.md)
+                                        .padding(.vertical, Spacing.sm)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: CornerRadius.sm)
+                                                .fill(UIPasteboard.general.hasStrings ? Color.forestGreen : Color.warmGrayLight)
+                                        )
                                 }
                                 .disabled(!UIPasteboard.general.hasStrings)
+                                .padding(.trailing, Spacing.sm)
                             }
                             .background(Color.white)
                             .cornerRadius(CornerRadius.md)
@@ -193,11 +199,10 @@ struct CloudKitAddGiftView: View {
                                 VStack(spacing: Spacing.sm) {
                                     Image(uiImage: selectedImage)
                                         .resizable()
-                                        .scaledToFill()
+                                        .scaledToFit()
                                         .frame(maxWidth: .infinity)
-                                        .frame(height: 200)
+                                        .frame(maxHeight: 300)
                                         .cornerRadius(CornerRadius.md)
-                                        .clipped()
 
                                     Button(action: {
                                         showingImagePicker = true
@@ -302,6 +307,10 @@ struct CloudKitAddGiftView: View {
 
                 let newItem = CKWishlistItem(from: savedRecord)
                 onItemAdded(newItem)
+
+                // Track for review prompt (after 3rd item)
+                ReviewManager.shared.incrementItemsAdded()
+
                 dismiss()
             } catch {
                 print("❌ Error saving item: \(error)")
@@ -449,11 +458,17 @@ struct CloudKitEditGiftView: View {
                                 }) {
                                     Text("Paste")
                                         .font(.bodyMedium)
-                                        .fontWeight(.medium)
-                                        .foregroundColor(UIPasteboard.general.hasStrings ? .forestGreen : .warmGrayLight)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.white)
                                         .padding(.horizontal, Spacing.md)
+                                        .padding(.vertical, Spacing.sm)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: CornerRadius.sm)
+                                                .fill(UIPasteboard.general.hasStrings ? Color.forestGreen : Color.warmGrayLight)
+                                        )
                                 }
                                 .disabled(!UIPasteboard.general.hasStrings)
+                                .padding(.trailing, Spacing.sm)
                             }
                             .background(Color.white)
                             .cornerRadius(CornerRadius.md)

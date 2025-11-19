@@ -131,3 +131,84 @@ struct SuccessSparkle: View {
         }
     }
 }
+
+// MARK: - Falling Snow Effect
+struct Snowflake: Identifiable {
+    let id = UUID()
+    var x: CGFloat
+    var y: CGFloat
+    var size: CGFloat
+    var opacity: Double
+    var speed: Double
+    var drift: CGFloat
+}
+
+struct FallingSnowEffect: View {
+    let snowflakeCount: Int
+    @State private var snowflakes: [Snowflake] = []
+    @State private var animate = false
+
+    init(snowflakeCount: Int = 30) {
+        self.snowflakeCount = snowflakeCount
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                ForEach(snowflakes) { snowflake in
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [.white, .white.opacity(0.6)],
+                                center: .center,
+                                startRadius: 0,
+                                endRadius: snowflake.size / 2
+                            )
+                        )
+                        .frame(width: snowflake.size, height: snowflake.size)
+                        .position(
+                            x: animate ? snowflake.x + snowflake.drift : snowflake.x,
+                            y: animate ? geometry.size.height + 50 : snowflake.y
+                        )
+                        .opacity(snowflake.opacity)
+                        .animation(
+                            .linear(duration: snowflake.speed)
+                            .repeatForever(autoreverses: false),
+                            value: animate
+                        )
+                }
+            }
+            .onAppear {
+                generateSnowflakes(in: geometry.size)
+                animate = true
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func generateSnowflakes(in size: CGSize) {
+        snowflakes = (0..<snowflakeCount).map { _ in
+            Snowflake(
+                x: CGFloat.random(in: 0...size.width),
+                y: CGFloat.random(in: -size.height...0),
+                size: CGFloat.random(in: 2...6),
+                opacity: Double.random(in: 0.3...0.7),
+                speed: Double.random(in: 8...15),
+                drift: CGFloat.random(in: -30...30)
+            )
+        }
+    }
+}
+
+extension View {
+    func fallingSnow(isActive: Bool = true, count: Int = 30) -> some View {
+        self
+            .overlay(
+                Group {
+                    if isActive {
+                        FallingSnowEffect(snowflakeCount: count)
+                    }
+                }
+            )
+    }
+}

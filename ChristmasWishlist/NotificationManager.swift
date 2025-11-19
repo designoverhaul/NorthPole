@@ -42,16 +42,25 @@ class NotificationManager {
 
     /// Send notification when someone purchases an item from your wishlist
     func sendItemPurchasedNotification(itemName: String, friendName: String) async {
+        print("📲 [LOCAL_NOTIFICATION] Attempting to send notification for item: '\(itemName)'")
+
         // Check if notifications are enabled in settings
-        guard UserDefaults.standard.bool(forKey: "notificationsEnabled") else {
+        let notificationsEnabled = UserDefaults.standard.bool(forKey: "notificationsEnabled")
+        print("⚙️ [LOCAL_NOTIFICATION] Settings: notificationsEnabled = \(notificationsEnabled)")
+
+        guard notificationsEnabled else {
             logger.info("Notifications disabled in settings, skipping notification")
+            print("⚠️ [LOCAL_NOTIFICATION] Notifications disabled in app settings")
             return
         }
 
         // Check authorization status
         let status = await checkAuthorizationStatus()
+        print("🔐 [LOCAL_NOTIFICATION] Authorization status: \(status.rawValue)")
+
         guard status == .authorized else {
             logger.warning("Notifications not authorized, current status: \(status.rawValue)")
+            print("⚠️ [LOCAL_NOTIFICATION] Not authorized (status: \(status.rawValue))")
             return
         }
 
@@ -68,6 +77,10 @@ class NotificationManager {
             "friendName": friendName
         ]
 
+        print("📝 [LOCAL_NOTIFICATION] Created notification content:")
+        print("   Title: \(content.title)")
+        print("   Body: \(content.body)")
+
         // Deliver immediately
         let request = UNNotificationRequest(
             identifier: UUID().uuidString,
@@ -77,9 +90,11 @@ class NotificationManager {
 
         do {
             try await center.add(request)
-            logger.info("Sent item purchased notification for '\(itemName)'")
+            logger.info("✅ Sent item purchased notification for '\(itemName)'")
+            print("✅ [LOCAL_NOTIFICATION] Successfully sent notification for '\(itemName)'")
         } catch {
-            logger.error("Failed to send notification: \(error.localizedDescription)")
+            logger.error("❌ Failed to send notification: \(error.localizedDescription)")
+            print("❌ [LOCAL_NOTIFICATION] Failed to send: \(error.localizedDescription)")
         }
     }
 

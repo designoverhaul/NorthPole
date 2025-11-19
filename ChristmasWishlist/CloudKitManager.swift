@@ -22,11 +22,15 @@ class CloudKitManager: ObservableObject {
     @Published var isSignedInToiCloud = false
     @Published var shouldRefreshFriends = false
 
+    // Polling for purchase notifications (fallback when push doesn't work)
+    private var purchasePollingTask: Task<Void, Never>?
+    private var lastCheckedPurchaseDate: Date?
+    private var notifiedPurchaseIDs: Set<String> = []  // Track which purchases we've already notified about
+
     // Record Types
     enum RecordType: String {
         case wishlistItem = "WishlistItem"
         case friend = "Friend"
-        case user = "User"
         case child = "Child"
         case purchase = "Purchase"
     }
@@ -522,50 +526,6 @@ class CloudKitManager: ObservableObject {
         return nil
     }
 
-    // MARK: - User Profile
-
-    func saveUserProfile(name: String) async throws -> CKRecord {
-        guard let userRecordID = currentUserRecordID else {
-            throw CloudKitError.notSignedIn
-        }
-
-        // Check if user profile already exists
-        let predicate = NSPredicate(format: "recordID == %@", userRecordID)
-        let query = CKQuery(recordType: RecordType.user.rawValue, predicate: predicate)
-
-        let (results, _) = try await privateDatabase.records(matching: query)
-
-        let record: CKRecord
-        if let existingRecord = results.first?.1, case .success(let existing) = existingRecord {
-            record = existing
-        } else {
-            record = CKRecord(recordType: RecordType.user.rawValue, recordID: userRecordID)
-        }
-
-        record["name"] = name as CKRecordValue
-
-        let savedRecord = try await privateDatabase.save(record)
-        print("☁️ CloudKit: Saved user profile")
-        return savedRecord
-    }
-
-    func fetchUserProfile() async throws -> String? {
-        guard let userRecordID = currentUserRecordID else {
-            throw CloudKitError.notSignedIn
-        }
-
-        do {
-            let record = try await privateDatabase.record(for: userRecordID)
-            let name = record["name"] as? String
-            print("☁️ CloudKit: Fetched user profile, name: \(name ?? "none")")
-            return name
-        } catch {
-            // User record doesn't exist yet, that's ok
-            print("☁️ CloudKit: No user profile found yet")
-            return nil
-        }
-    }
-
     // MARK: - Helper Methods
 
     private func createImageAsset(from image: UIImage) throws -> CKAsset {
@@ -582,6 +542,52 @@ class CloudKitManager: ObservableObject {
     }
 
     // MARK: - Subscriptions (for real-time updates)
+
+    /// Fetch all active subscriptions to help debug
+    func fetchAllSubscriptions() async throws -> [CKSubscription] {
+        print("🔍 [SUBSCRIPTION] Fetching all active subscriptions...")
+        let subscriptions = try await publicDatabase.allSubscriptions()
+        print("📋 [SUBSCRIPTION] Found \(subscriptions.count) active subscriptions:")
+        for subscription in subscriptions {
+            print("   - \(subscription.subscriptionID)")
+        }
+        return subscriptions
+    }
+
+    /// Delete a specific subscription by ID
+    func deleteSubscription(withID subscriptionID: String) async throws {
+        print("🗑️ [SUBSCRIPTION] Deleting subscription: \(subscriptionID)")
+        try await publicDatabase.deleteSubscription(withID: subscriptionID)
+        print("✅ [SUBSCRIPTION] Successfully deleted subscription: \(subscriptionID)")
+    }
+
+    /// Delete all subscriptions (useful for debugging)
+    func deleteAllSubscriptions() async throws {
+        print("🗑️ [SUBSCRIPTION] Deleting all subscriptions...")
+        let subscriptions = try await fetchAllSubscriptions()
+        for subscription in subscriptions {
+            try await deleteSubscription(withID: subscription.subscriptionID)
+        }
+        print("✅ [SUBSCRIPTION] All subscriptions deleted")
+    }
+
+    /// Re-subscribe to all notifications (useful after debugging)
+    func resubscribeToAll() async throws {
+        print("🔄 [SUBSCRIPTION] Re-subscribing to all notifications...")
+
+        // Delete existing subscriptions first
+        do {
+            try await deleteAllSubscriptions()
+        } catch {
+            print("⚠️ [SUBSCRIPTION] Error deleting existing subscriptions (might not exist): \(error)")
+        }
+
+        // Subscribe fresh
+        try await subscribeToMyWishlistChanges()
+        try await subscribeToPurchases()
+
+        print("✅ [SUBSCRIPTION] Successfully re-subscribed to all notifications")
+    }
 
     func subscribeToMyWishlistChanges() async throws {
         guard let userRecordID = currentUserRecordID else {
@@ -614,23 +620,223 @@ class CloudKitManager: ObservableObject {
         }
     }
 
-    func handlePurchaseNotification(recordID: CKRecord.ID) async throws {
-        // Fetch the updated record
-        let record = try await publicDatabase.record(for: recordID)
-
-        // Check if it was marked as purchased
-        guard let isPurchased = record["isPurchased"] as? Bool,
-              isPurchased,
-              let itemName = record["name"] as? String else {
-            return
+    func subscribeToPurchases() async throws {
+        guard let userRecordID = currentUserRecordID else {
+            throw CloudKitError.notSignedIn
         }
 
-        // Send local notification
-        // Note: We don't have the purchaser's name here, so we'll use "Someone"
-        await NotificationManager.shared.sendItemPurchasedNotification(
-            itemName: itemName,
-            friendName: "Someone"
+        // Subscribe to Purchase records created for ANY items
+        // We filter in the notification handler to only process purchases for our items
+        let subscriptionID = "my-items-purchases"
+
+        print("📢 [SUBSCRIPTION] Attempting to subscribe to purchases for user: \(userRecordID.recordName)")
+
+        // Create predicate that fires when ANY Purchase is created
+        // We'll check ownership in handlePurchaseNotification
+        let predicate = NSPredicate(value: true)
+        let subscription = CKQuerySubscription(
+            recordType: RecordType.purchase.rawValue,
+            predicate: predicate,
+            subscriptionID: subscriptionID,
+            options: [.firesOnRecordCreation]
         )
+
+        // Set up SILENT notification - we'll create the alert in the handler
+        // This way we can include the actual item name in the notification
+        let notificationInfo = CKSubscription.NotificationInfo()
+        notificationInfo.shouldSendContentAvailable = true  // Silent push to wake app
+        // DON'T set alertBody or soundName - we'll send the local notification from the handler
+
+        // Add these to help with debugging
+        notificationInfo.desiredKeys = ["itemRecordID", "purchaserUserRecordID", "purchasedAt"]
+
+        subscription.notificationInfo = notificationInfo
+
+        do {
+            let savedSubscription = try await publicDatabase.save(subscription)
+            print("✅ [SUBSCRIPTION] Successfully subscribed to purchase notifications")
+            print("📋 [SUBSCRIPTION] Subscription ID: \(savedSubscription.subscriptionID)")
+            print("📋 [SUBSCRIPTION] Notification config: alert=\(notificationInfo.alertBody ?? "none"), contentAvailable=\(notificationInfo.shouldSendContentAvailable)")
+        } catch let error as CKError {
+            // Check if subscription already exists
+            if error.code == .serverRecordChanged {
+                print("ℹ️ [SUBSCRIPTION] Subscription already exists (this is normal)")
+            } else {
+                print("❌ [SUBSCRIPTION] Failed to subscribe: \(error.localizedDescription)")
+                print("❌ [SUBSCRIPTION] Error code: \(error.code)")
+                print("❌ [SUBSCRIPTION] Error details: \(error)")
+                throw error
+            }
+        } catch {
+            print("❌ [SUBSCRIPTION] Unexpected error: \(error)")
+            throw error
+        }
+    }
+
+    func handlePurchaseNotification(recordID: CKRecord.ID) async throws {
+        print("🔔 [NOTIFICATION] Handling notification for record: \(recordID.recordName)")
+
+        // Fetch the record to determine if it's a Purchase or WishlistItem
+        let record = try await publicDatabase.record(for: recordID)
+        print("📋 [NOTIFICATION] Fetched record type: \(record.recordType)")
+
+        if record.recordType == RecordType.purchase.rawValue {
+            // This is a Purchase record notification
+            guard let itemRecordID = record["itemRecordID"] as? String else {
+                print("⚠️ [NOTIFICATION] Purchase record missing itemRecordID")
+                return
+            }
+
+            print("🔍 [NOTIFICATION] Fetching item details for: \(itemRecordID)")
+
+            // Fetch the item to get its name and check if it's mine
+            do {
+                let itemRecord = try await publicDatabase.record(for: CKRecord.ID(recordName: itemRecordID))
+
+                // Check if this item belongs to me
+                guard let ownerID = itemRecord["ownerID"] as? String else {
+                    print("⚠️ [NOTIFICATION] Item missing ownerID")
+                    return
+                }
+
+                guard let itemName = itemRecord["name"] as? String else {
+                    print("⚠️ [NOTIFICATION] Item missing name")
+                    return
+                }
+
+                print("👤 [NOTIFICATION] Item owner: \(ownerID)")
+                print("👤 [NOTIFICATION] Current user: \(currentUserRecordID?.recordName ?? "unknown")")
+
+                if ownerID == currentUserRecordID?.recordName {
+                    print("✅ [NOTIFICATION] Item belongs to me! Sending local notification...")
+
+                    // Track this purchase to avoid duplicates from polling
+                    notifiedPurchaseIDs.insert(recordID.recordName)
+
+                    // Send local notification
+                    await NotificationManager.shared.sendItemPurchasedNotification(
+                        itemName: itemName,
+                        friendName: "Someone"
+                    )
+
+                    print("✅ [NOTIFICATION] Local notification sent for '\(itemName)'")
+                } else {
+                    print("ℹ️ [NOTIFICATION] Item belongs to someone else, skipping notification")
+                }
+            } catch {
+                print("❌ [NOTIFICATION] Failed to fetch item for purchase notification: \(error)")
+            }
+        } else if record.recordType == RecordType.wishlistItem.rawValue {
+            // Legacy: WishlistItem update notification (old system)
+            print("ℹ️ [NOTIFICATION] Received legacy WishlistItem update notification")
+            guard let isPurchased = record["isPurchased"] as? Bool,
+                  isPurchased,
+                  let itemName = record["name"] as? String else {
+                print("⚠️ [NOTIFICATION] Legacy notification missing required fields")
+                return
+            }
+
+            print("✅ [NOTIFICATION] Sending notification for legacy item: \(itemName)")
+            await NotificationManager.shared.sendItemPurchasedNotification(
+                itemName: itemName,
+                friendName: "Someone"
+            )
+        } else {
+            print("⚠️ [NOTIFICATION] Unknown record type: \(record.recordType)")
+        }
+    }
+
+    // MARK: - Purchase Polling (Fallback)
+
+    /// Start polling for new purchases (fallback when CloudKit push doesn't work)
+    func startPurchasePolling(interval: TimeInterval = 30) {
+        // Stop any existing polling
+        stopPurchasePolling()
+
+        print("🔄 [POLLING] Starting purchase polling (checking every \(Int(interval))s)")
+
+        // Initialize last checked date to now
+        if lastCheckedPurchaseDate == nil {
+            lastCheckedPurchaseDate = Date()
+        }
+
+        purchasePollingTask = Task {
+            while !Task.isCancelled {
+                do {
+                    // Wait for the interval
+                    try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+
+                    // Check for new purchases
+                    await checkForNewPurchases()
+                } catch {
+                    // Task was cancelled or sleep failed
+                    break
+                }
+            }
+        }
+    }
+
+    /// Stop purchase polling
+    func stopPurchasePolling() {
+        purchasePollingTask?.cancel()
+        purchasePollingTask = nil
+        print("⏹️ [POLLING] Stopped purchase polling")
+    }
+
+    /// Check for new purchases since last check
+    private func checkForNewPurchases() async {
+        guard let userRecordID = currentUserRecordID else { return }
+        guard let lastChecked = lastCheckedPurchaseDate else { return }
+
+        do {
+            // Fetch all my items
+            let myItems = try await fetchMyWishlistItems()
+
+            // Check purchases for each item
+            for item in myItems {
+                let purchases = try await fetchPurchasesForItem(itemRecordID: item.recordID.recordName)
+
+                // Find purchases created after last check
+                for purchase in purchases {
+                    let purchaseID = purchase.recordID.recordName
+
+                    // Skip if we already notified about this purchase (from CloudKit push)
+                    if notifiedPurchaseIDs.contains(purchaseID) {
+                        print("⏭️ [POLLING] Skipping purchase \(purchaseID) - already notified")
+                        continue
+                    }
+
+                    guard let purchasedAt = purchase["purchasedAt"] as? Date else { continue }
+                    guard let purchaserID = purchase["purchaserUserRecordID"] as? String else { continue }
+
+                    // Skip if this purchase is from before our last check
+                    if purchasedAt <= lastChecked { continue }
+
+                    // Skip if I purchased it myself
+                    if purchaserID == userRecordID.recordName { continue }
+
+                    // This is a new purchase from someone else!
+                    guard let itemName = item["name"] as? String else { continue }
+
+                    print("🆕 [POLLING] Found new purchase for '\(itemName)' at \(purchasedAt)")
+
+                    // Track this purchase to avoid duplicates
+                    notifiedPurchaseIDs.insert(purchaseID)
+
+                    // Send notification
+                    await NotificationManager.shared.sendItemPurchasedNotification(
+                        itemName: itemName,
+                        friendName: "Someone"
+                    )
+                }
+            }
+
+            // Update last checked time
+            lastCheckedPurchaseDate = Date()
+
+        } catch {
+            print("❌ [POLLING] Error checking for purchases: \(error)")
+        }
     }
 }
 

@@ -382,6 +382,9 @@ struct FriendWishlistView: View {
                         showSuccessSparkle = true
                     }
 
+                    // Track for review prompt (after first purchase)
+                    ReviewManager.shared.markFirstPurchase()
+
                     print("✅ Marked item as purchased")
                 }
             } catch {
@@ -405,6 +408,12 @@ struct FriendWishlistView: View {
             do {
                 try await cloudKit.deleteFriend(friend.record.recordID)
                 HapticManager.itemDeleted()
+
+                // Trigger friends list refresh
+                await MainActor.run {
+                    cloudKit.shouldRefreshFriends.toggle()
+                }
+
                 dismiss()
             } catch {
                 errorMessage = "Failed to remove friend: \(error.localizedDescription)"
@@ -420,6 +429,12 @@ struct FriendWishlistView: View {
             do {
                 try await cloudKit.hideChildFromFriend(friendRecordID: friend.record.recordID, childRecordID: child.id)
                 HapticManager.buttonTapped()
+
+                // Trigger friends list refresh
+                await MainActor.run {
+                    cloudKit.shouldRefreshFriends.toggle()
+                }
+
                 dismiss()
             } catch {
                 errorMessage = "Failed to hide child: \(error.localizedDescription)"
@@ -452,22 +467,15 @@ struct FriendItemDetailView: View {
                             .frame(maxWidth: .infinity)
                             .frame(maxHeight: 300)
                             .cornerRadius(CornerRadius.md)
-                            .clipped()
+                            .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 4)
                     }
 
                     // Item name
                     Text(item.name)
-                        .font(.custom("Caveat", size: 48))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.gold, Color.goldShimmer, Color.gold],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                        .font(.custom("Caveat", size: 44))
+                        .foregroundColor(.warmBlack)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
-                        .strikethrough(item.isPurchased, color: .warmGray)
 
                     // Purchase status badge
                     if item.isPurchased, let purchasedAt = item.purchasedAt {
@@ -487,20 +495,13 @@ struct FriendItemDetailView: View {
 
                     // Description
                     if let description = item.itemDescription, !description.isEmpty {
-                        VStack(alignment: .leading, spacing: Spacing.sm) {
-                            Text("Description")
-                                .font(.bodyMedium)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.warmBlack)
-
-                            Text(description)
-                                .font(.bodyMedium)
-                                .foregroundColor(.warmGray)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(Spacing.md)
-                        .background(Color.creamCard)
-                        .cornerRadius(CornerRadius.md)
+                        Text(description)
+                            .font(.bodyMedium)
+                            .foregroundColor(.warmGray)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Spacing.md)
+                            .background(Color.creamCard)
+                            .cornerRadius(CornerRadius.md)
                     }
 
                     // URL Link
@@ -529,7 +530,8 @@ struct FriendItemDetailView: View {
                         dismiss()
                     }) {
                         HStack {
-                            Image(systemName: item.isPurchased ? "checkmark.circle.fill" : "circle")
+                            Text("🎁")
+                                .font(.system(size: 20))
                             Text(item.isPurchased ? "Mark as Not Purchased" : "Mark as Purchased")
                         }
                         .frame(maxWidth: .infinity)
@@ -568,21 +570,27 @@ struct FriendWishlistItemRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
-            Text(item.name)
-                .font(.custom("Caveat", size: 32))
-                .lineSpacing(-18)
-                .foregroundColor(isPurchased ? .warmGray : .warmBlack)
-                .strikethrough(isPurchased, color: .warmGray)
-                .lineLimit(2)
-
-            Spacer()
-
+            // Checkmark circle on the left
             Button(action: onTogglePurchase) {
                 Image(systemName: isPurchased ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 28))
                     .foregroundColor(isPurchased ? .successGreen : .warmGrayLight)
             }
             .buttonStyle(PlainButtonStyle())
+
+            // Item name
+            Text(item.name)
+                .font(.custom("Caveat", size: 32))
+                .lineSpacing(-18)
+                .foregroundColor(.warmBlack)
+                .lineLimit(2)
+
+            Spacer()
+
+            // Chevron on the right
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14))
+                .foregroundColor(.warmGrayLight)
         }
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, Spacing.sm)

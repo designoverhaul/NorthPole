@@ -13,10 +13,13 @@ import CloudKit
 enum OnboardingStep {
     case welcome
     case addChildren
+    case surprisePreference
+    case instructions
 }
 
 struct OnboardingView: View {
     @StateObject private var cloudKit = CloudKitManager.shared
+    @AppStorage("showPurchasedItems") private var showPurchasedItems = true
     @State private var currentStep: OnboardingStep = .welcome
     @State private var showingContactPicker = false
     @State private var selectedContacts: [CNContact] = []
@@ -40,8 +43,13 @@ struct OnboardingView: View {
                 welcomeScreen
             case .addChildren:
                 childrenScreen
+            case .surprisePreference:
+                surprisePreferenceScreen
+            case .instructions:
+                instructionsScreen
             }
         }
+        .fallingSnow(isActive: true, count: 25)
         .sheet(isPresented: $showingContactPicker) {
             MultiContactPickerView { contacts in
                 selectedContacts = contacts
@@ -73,18 +81,20 @@ struct OnboardingView: View {
             Image("Santa")
                 .resizable()
                 .scaledToFit()
-                .frame(maxWidth: 280)
+                .frame(maxWidth: 200)
+                .parallax3D()
                 .padding(.horizontal, Spacing.lg)
 
             // Santa's message (directly on background, no container)
             VStack(spacing: Spacing.md) {
-                Text("Welcome!\nI'll be your matchmaker for gifting.")
-                    .font(.custom("Caveat", size: 37))
+                Text("Welcome!\nI'll be your gifting matchmaker.")
+                    .font(.custom("Caveat", size: 32))
+                    .lineSpacing(-8)
                     .foregroundColor(.warmBlack)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Thanks for the help. Please select everyone that you may exchange gifts with.")
+                Text("Please select everyone that you may exchange gifts with.")
                     .font(.bodyLarge)
                     .foregroundColor(.warmGray)
                     .multilineTextAlignment(.center)
@@ -97,7 +107,7 @@ struct OnboardingView: View {
             if isProcessing {
                 VStack(spacing: Spacing.sm) {
                     ProgressView(value: processingProgress)
-                        .tint(.forestGreen)
+                        .tint(.gold)
                         .padding(.horizontal, Spacing.xl)
 
                     Text("Adding \(selectedContacts.count) friends...")
@@ -123,13 +133,18 @@ struct OnboardingView: View {
                         RoundedRectangle(cornerRadius: CornerRadius.md)
                             .fill(
                                 LinearGradient(
-                                    colors: [Color.forestGreen, Color.forestGreenLight],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
+                                    colors: [Color.gold, Color.goldShimmer, Color.gold],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
                                 )
                             )
                     )
-                    .shadow(color: DesignShadow.medium, radius: 8, x: 0, y: 4)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                            .stroke(Color.gold.opacity(0.6), lineWidth: 2)
+                    )
+                    .shadow(color: Color.gold.opacity(0.4), radius: 12, x: 0, y: 6)
+                    .shadow(color: Color.goldShimmer.opacity(0.3), radius: 4, x: 0, y: 2)
                 }
                 .sparkle(isActive: true)
                 .padding(.horizontal, Spacing.xl)
@@ -152,19 +167,22 @@ struct OnboardingView: View {
 
     // MARK: - Children Screen
     private var childrenScreen: some View {
-        VStack(spacing: Spacing.xl) {
-            Spacer()
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: Spacing.xl) {
+                Spacer()
 
-            // Santa Image
-            Image("Santa")
+            // Cookies Image
+            Image("cookie")
                 .resizable()
                 .scaledToFit()
                 .frame(maxWidth: 200)
+                .parallax3D()
                 .padding(.horizontal, Spacing.lg)
 
             // Santa's message (directly on background, no container)
-            Text("Would you like to add any kids to the gift exchange?")
-                .font(.custom("Caveat", size: 37))
+            Text("Would you like to add your kids to the gift exchange?")
+                .font(.custom("Caveat", size: 32))
+                .lineSpacing(-8)
                 .foregroundColor(.warmBlack)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -213,26 +231,35 @@ struct OnboardingView: View {
                     Image(systemName: "person.crop.circle.badge.plus")
                     Text("Add a Child")
                 }
-                .font(.bodyLarge.weight(.semibold))
-                .foregroundColor(.forestGreen)
+                .font(.headingSmall)
+                .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Spacing.md)
                 .background(
                     RoundedRectangle(cornerRadius: CornerRadius.md)
-                        .stroke(Color.forestGreen, lineWidth: 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: CornerRadius.md)
-                                .fill(Color.creamCard)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.gold, Color.goldShimmer, Color.gold],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
                 )
+                .overlay(
+                    RoundedRectangle(cornerRadius: CornerRadius.md)
+                        .stroke(Color.gold.opacity(0.6), lineWidth: 2)
+                )
+                .shadow(color: Color.gold.opacity(0.4), radius: 12, x: 0, y: 6)
+                .shadow(color: Color.goldShimmer.opacity(0.3), radius: 4, x: 0, y: 2)
             }
+            .sparkle(isActive: true)
             .padding(.horizontal, Spacing.xl)
 
             // Continue/Skip Button
             if isProcessing {
                 VStack(spacing: Spacing.sm) {
                     ProgressView(value: processingProgress)
-                        .tint(.forestGreen)
+                        .tint(.gold)
                         .padding(.horizontal, Spacing.xl)
 
                     Text("Adding children...")
@@ -245,27 +272,241 @@ struct OnboardingView: View {
                     HapticManager.buttonTapped()
                     processChildren()
                 } label: {
-                    Text(childrenToAdd.isEmpty ? "Skip" : "Continue")
+                    Text(childrenToAdd.isEmpty ? "Skip for now" : "Continue")
                         .font(.headingSmall)
-                        .foregroundColor(.white)
+                        .bold()
+                        .foregroundColor(childrenToAdd.isEmpty ? .warmGray : Color(hex: "#8B2E1F"))
+                }
+                .padding(.bottom, Spacing.xl)
+            }
+            }
+
+            // Back button
+            Button(action: {
+                HapticManager.buttonTapped()
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                    currentStep = .welcome
+                }
+            }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.forestGreen)
+                    .padding(Spacing.md)
+                    .background(
+                        Circle()
+                            .fill(Color.white)
+                            .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 2)
+                    )
+            }
+            .padding(.top, 60)
+            .padding(.leading, Spacing.lg)
+        }
+        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+    }
+
+    // MARK: - Surprise Preference Screen
+    private var surprisePreferenceScreen: some View {
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: Spacing.xl) {
+                Spacer()
+
+                // Milk Image
+                Image("milk")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 200)
+                    .parallax3D()
+                    .padding(.horizontal, Spacing.lg)
+
+                // Santa's message
+                Text("Would you like to know if items are checked off your list?")
+                    .font(.custom("Caveat", size: 32))
+                    .lineSpacing(-8)
+                    .foregroundColor(.warmBlack)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, Spacing.lg)
+
+                Spacer()
+
+                // Choice Buttons
+                VStack(spacing: Spacing.md) {
+                    // "I like surprises!" button
+                    Button {
+                        HapticManager.buttonTapped()
+                        showPurchasedItems = false
+                        UserDefaults.standard.set(false, forKey: "showPurchasedItems")
+                        UserDefaults.standard.set(false, forKey: "notificationsEnabled")
+                        moveToInstructionsScreen()
+                    } label: {
+                        VStack(spacing: Spacing.xs) {
+                            Text("I like surprises!")
+                                .font(.headingSmall)
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+                        }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
                         .background(
                             RoundedRectangle(cornerRadius: CornerRadius.md)
                                 .fill(
                                     LinearGradient(
-                                        colors: [Color.forestGreen, Color.forestGreenLight],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
+                                        colors: [Color.gold, Color.goldShimmer, Color.gold],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
                                     )
                                 )
                         )
-                        .shadow(color: DesignShadow.medium, radius: 8, x: 0, y: 4)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: CornerRadius.md)
+                                .stroke(Color.gold.opacity(0.6), lineWidth: 2)
+                        )
+                        .shadow(color: Color.gold.opacity(0.4), radius: 12, x: 0, y: 6)
+                        .shadow(color: Color.goldShimmer.opacity(0.3), radius: 4, x: 0, y: 2)
+                    }
+                    .sparkle(isActive: true)
+
+                    // "I don't like surprises" button
+                    Button {
+                        HapticManager.buttonTapped()
+                        showPurchasedItems = true
+                        UserDefaults.standard.set(true, forKey: "showPurchasedItems")
+                        UserDefaults.standard.set(true, forKey: "notificationsEnabled")
+                        moveToInstructionsScreen()
+                    } label: {
+                        VStack(spacing: Spacing.xs) {
+                            Text("I don't like surprises.")
+                                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                .foregroundColor(.warmGray)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Spacing.md)
+                        .background(
+                            RoundedRectangle(cornerRadius: CornerRadius.md)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.gray.opacity(0.2), Color.gray.opacity(0.15)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: CornerRadius.md)
+                                .stroke(Color.gray.opacity(0.3), lineWidth: 2)
+                        )
+                        .shadow(color: Color.gray.opacity(0.2), radius: 8, x: 0, y: 4)
+                    }
                 }
-                .sparkle(isActive: !childrenToAdd.isEmpty)
                 .padding(.horizontal, Spacing.xl)
                 .padding(.bottom, Spacing.xl)
             }
+
+            // Back button
+            Button(action: {
+                HapticManager.buttonTapped()
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                    currentStep = .addChildren
+                }
+            }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.forestGreen)
+                    .padding(Spacing.md)
+                    .background(
+                        Circle()
+                            .fill(Color.white)
+                            .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 2)
+                    )
+            }
+            .padding(.top, 60)
+            .padding(.leading, Spacing.lg)
+        }
+        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+    }
+
+    // MARK: - Instructions Screen
+    private var instructionsScreen: some View {
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: Spacing.md) {
+                Spacer()
+                    .frame(height: 40)
+
+                // Heading
+                Text("Adding items\nto your wishlist")
+                    .font(.custom("Caveat", size: 32))
+                    .lineSpacing(-8)
+                    .foregroundColor(.warmBlack)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.bottom, Spacing.sm)
+
+                // Instructions Image - Maximum size
+                Image("instructions")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: 450)
+                    .padding(.horizontal, Spacing.md)
+
+                Spacer()
+
+                // Continue Button
+                Button {
+                    HapticManager.buttonTapped()
+                    UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+                    isCompleted = true
+                } label: {
+                    VStack(spacing: Spacing.xs) {
+                        Text("Get Started")
+                            .font(.headingSmall)
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.gold, Color.goldShimmer, Color.gold],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                            .stroke(Color.gold.opacity(0.6), lineWidth: 2)
+                    )
+                    .shadow(color: Color.gold.opacity(0.4), radius: 12, x: 0, y: 6)
+                    .shadow(color: Color.goldShimmer.opacity(0.3), radius: 4, x: 0, y: 2)
+                }
+                .sparkle(isActive: true)
+                .padding(.horizontal, Spacing.xl)
+                .padding(.bottom, Spacing.xl)
+            }
+
+            // Back button
+            Button(action: {
+                HapticManager.buttonTapped()
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                    currentStep = .surprisePreference
+                }
+            }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.forestGreen)
+                    .padding(Spacing.md)
+                    .background(
+                        Circle()
+                            .fill(Color.white)
+                            .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 2)
+                    )
+            }
+            .padding(.top, 60)
+            .padding(.leading, Spacing.lg)
         }
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
     }
@@ -284,8 +525,8 @@ struct OnboardingView: View {
                         showingContactPicker = true
                     } else {
                         HapticManager.errorOccurred()
-                        // User denied - complete onboarding anyway
-                        completeOnboarding()
+                        // User denied - move to children screen
+                        moveToChildrenScreen()
                     }
                 }
             }
@@ -307,6 +548,23 @@ struct OnboardingView: View {
         withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
             currentStep = .addChildren
         }
+    }
+
+    private func moveToSurprisePreferenceScreen() {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+            currentStep = .surprisePreference
+        }
+    }
+
+    private func moveToInstructionsScreen() {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+            currentStep = .instructions
+        }
+    }
+
+    private func handleSurprisePreference(showPurchased: Bool) {
+        showPurchasedItems = showPurchased
+        completeOnboarding()
     }
 
     private func addChild() {
@@ -364,8 +622,22 @@ struct OnboardingView: View {
                         imageData: imageData,
                         friendUserRecordID: friendUserRecordID
                     )
+                } catch let ckError as CKError where ckError.code == .quotaExceeded {
+                    // CloudKit quota exceeded - show error and stop processing
+                    print("❌ CloudKit quota exceeded while adding \(name)")
+                    await MainActor.run {
+                        failedFriends.append(name)
+                        errorMessage = ckError.userFriendlyMessage
+                        showingError = true
+                        isProcessing = false
+                    }
+                    break // Stop processing remaining contacts
                 } catch {
-                    print("Failed to add friend \(name): \(error)")
+                    // Other error - log and continue with next contact
+                    print("❌ Failed to add friend \(name): \(error)")
+                    await MainActor.run {
+                        failedFriends.append(name)
+                    }
                 }
 
                 // Update progress
@@ -374,8 +646,11 @@ struct OnboardingView: View {
                 }
             }
 
-            // Small delay to show completion
-            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            // Delay for CloudKit consistency and trigger refresh in FriendsListView
+            try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+
+            // Notify FriendsListView to refresh when user navigates to it
+            CloudKitManager.shared.shouldRefreshFriends.toggle()
 
             HapticManager.itemAdded()
             await MainActor.run {
@@ -386,11 +661,13 @@ struct OnboardingView: View {
     }
 
     private func processChildren() {
+        // If no children to add, move to surprise preference screen immediately
         guard !childrenToAdd.isEmpty else {
-            completeOnboarding()
+            moveToSurprisePreferenceScreen()
             return
         }
 
+        // Has children to save
         isProcessing = true
         processingProgress = 0
 
@@ -411,8 +688,10 @@ struct OnboardingView: View {
             // Small delay to show completion
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
 
-            HapticManager.itemAdded()
-            completeOnboarding()
+            await MainActor.run {
+                HapticManager.itemAdded()
+                moveToSurprisePreferenceScreen()
+            }
         }
     }
 

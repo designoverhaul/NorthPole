@@ -78,12 +78,26 @@ class URLProductExtractor {
 
     private static func fetchHTML(from url: URL) async -> String? {
         var request = URLRequest(url: url)
-        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+        // Use desktop User-Agent for better meta tag support
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
         request.timeoutInterval = 15
 
         do {
             let (data, _) = try await URLSession.shared.data(for: request)
-            return String(data: data, encoding: .utf8)
+            guard let html = String(data: data, encoding: .utf8) else {
+                print("URLProductExtractor: Failed to decode HTML")
+                return nil
+            }
+
+            print("URLProductExtractor: Fetched HTML (\(html.count) chars)")
+
+            // Debug: Print a sample of meta tags found
+            let metaSample = html.components(separatedBy: "<meta").prefix(5).joined(separator: "\n<meta")
+            print("URLProductExtractor: Sample meta tags:\n\(metaSample)")
+
+            return html
         } catch {
             print("URLProductExtractor: Failed to fetch URL - \(error.localizedDescription)")
             return nil
@@ -98,6 +112,8 @@ class URLProductExtractor {
         // Extract Open Graph meta tags
         let ogTags = extractMetaTags(from: html, prefix: "og:")
 
+        print("URLProductExtractor: Found \(ogTags.count) og: tags")
+
         // Title
         if let title = ogTags["og:title"] {
             data.name = cleanText(title)
@@ -105,12 +121,23 @@ class URLProductExtractor {
 
         // Image - convert relative URLs to absolute
         if let imageURLString = ogTags["og:image"] {
+            print("URLProductExtractor: Found og:image = \(imageURLString)")
             data.imageURL = absoluteURL(from: imageURLString, baseURL: baseURL)
         }
 
         // Description
         if let description = ogTags["og:description"] {
             data.description = cleanText(description)
+        }
+
+        // Fallback to Twitter meta tags for image
+        if data.imageURL == nil {
+            let twitterTags = extractMetaTags(from: html, prefix: "twitter:")
+            print("URLProductExtractor: Found \(twitterTags.count) twitter: tags")
+            if let imageURLString = twitterTags["twitter:image"] {
+                print("URLProductExtractor: Found twitter:image = \(imageURLString)")
+                data.imageURL = absoluteURL(from: imageURLString, baseURL: baseURL)
+            }
         }
 
         // Fallback to standard meta tags if OG not found
@@ -132,7 +159,24 @@ class URLProductExtractor {
         if data.imageURL == nil {
             let standardTags = extractMetaTags(from: html, prefix: "")
             if let imageURLString = standardTags["image"] {
+                print("URLProductExtractor: Found meta image = \(imageURLString)")
                 data.imageURL = absoluteURL(from: imageURLString, baseURL: baseURL)
+            }
+        }
+
+        // Last resort: Try itemprop="image"
+        if data.imageURL == nil {
+            if let imageURL = extractItempropImage(from: html, baseURL: baseURL) {
+                print("URLProductExtractor: Found itemprop image = \(imageURL)")
+                data.imageURL = imageURL
+            }
+        }
+
+        // Final fallback: Look for main product images in common patterns
+        if data.imageURL == nil {
+            if let imageURL = extractMainProductImage(from: html, baseURL: baseURL) {
+                print("URLProductExtractor: Found main product image = \(imageURL)")
+                data.imageURL = imageURL
             }
         }
 
@@ -173,29 +217,34 @@ class URLProductExtractor {
     private static func extractMetaTags(from html: String, prefix: String) -> [String: String] {
         var tags: [String: String] = [:]
 
-        // Pattern for meta tags: <meta property="og:title" content="Product Name">
-        // Also supports <meta name="description" content="...">
-        let patterns = [
-            #"<meta\s+property=["\'](\#(prefix)[^"\']+)["\']\s+content=["\']([^"\']+)["\']"#,
-            #"<meta\s+content=["\']([^"\']+)["\']\s+property=["\'](\#(prefix)[^"\']+)["\']"#,
-            #"<meta\s+name=["\']([^"\']+)["\']\s+content=["\']([^"\']+)["\']"#,
-            #"<meta\s+content=["\']([^"\']+)["\']\s+name=["\']([^"\']+)["\']"#
+        // More flexible patterns that allow for any attributes between <meta and the key attributes
+        // This handles cases like: <meta data-react-helmet="true" property="og:image" content="...">
+        let patterns: [(String, String)] = [
+            // property="..." content="..." (with any attributes in between)
+            (#"<meta[^>]*?property=["\'](\#(prefix)[^"\']+)["\'][^>]*?content=["\']([^"\']+)["\']"#, "property"),
+            // content="..." property="..." (reversed order)
+            (#"<meta[^>]*?content=["\']([^"\']+)["\'][^>]*?property=["\'](\#(prefix)[^"\']+)["\']"#, "property-reverse"),
+            // name="..." content="..." (for standard meta tags)
+            (#"<meta[^>]*?name=["\']([^"\']+)["\'][^>]*?content=["\']([^"\']+)["\']"#, "name"),
+            // content="..." name="..." (reversed)
+            (#"<meta[^>]*?content=["\']([^"\']+)["\'][^>]*?name=["\']([^"\']+)["\']"#, "name-reverse")
         ]
 
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+        for (pattern, type) in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
                 let nsString = html as NSString
                 let matches = regex.matches(in: html, range: NSRange(location: 0, length: nsString.length))
 
                 for match in matches {
                     if match.numberOfRanges == 3 {
-                        let key = nsString.substring(with: match.range(at: 1))
-                        let value = nsString.substring(with: match.range(at: 2))
+                        let firstCapture = nsString.substring(with: match.range(at: 1))
+                        let secondCapture = nsString.substring(with: match.range(at: 2))
 
-                        // For name/content pattern, swap if needed
-                        if pattern.contains("name=") && prefix.isEmpty {
-                            tags[key] = value
-                        } else if pattern.contains("property=") {
+                        // Determine key and value based on pattern type
+                        let (key, value) = type.hasSuffix("-reverse") ? (secondCapture, firstCapture) : (firstCapture, secondCapture)
+
+                        // Only add if prefix matches or prefix is empty
+                        if prefix.isEmpty || key.hasPrefix(prefix) {
                             tags[key] = value
                         }
                     }
@@ -204,6 +253,101 @@ class URLProductExtractor {
         }
 
         return tags
+    }
+
+    /// Extract image from itemprop="image" attributes
+    private static func extractItempropImage(from html: String, baseURL: URL) -> String? {
+        // Pattern: <img itemprop="image" src="..." /> or <meta itemprop="image" content="..." />
+        let patterns = [
+            #"<img[^>]*?itemprop=["\']image["\'][^>]*?src=["\']([^"\']+)["\']"#,
+            #"<meta[^>]*?itemprop=["\']image["\'][^>]*?content=["\']([^"\']+)["\']"#
+        ]
+
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let nsString = html as NSString
+                if let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: nsString.length)),
+                   match.numberOfRanges == 2 {
+                    let imageURLString = nsString.substring(with: match.range(at: 1))
+                    return absoluteURL(from: imageURLString, baseURL: baseURL)
+                }
+            }
+        }
+
+        return nil
+    }
+
+    /// Extract main product image from common e-commerce patterns
+    private static func extractMainProductImage(from html: String, baseURL: URL) -> String? {
+        // Amazon-specific patterns
+        let amazonPatterns = [
+            // data-old-hires attribute (high-res image)
+            #"data-old-hires=["\']([^"\']+)["\']"#,
+            // data-a-dynamic-image (contains JSON with image URLs)
+            #"data-a-dynamic-image=["\'](\{[^\}]*?https?://[^\}]+\})["\']"#,
+            // landingImage id
+            #"id=["\']landingImage["\'][^>]*?src=["\']([^"\']+)["\']"#,
+            // imgTagWrapper class
+            #"class=["\'][^"\']*imgTagWrapper[^"\']*["\'][^>]*?<img[^>]*?src=["\']([^"\']+)["\']"#
+        ]
+
+        for pattern in amazonPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let nsString = html as NSString
+                if let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: nsString.length)),
+                   match.numberOfRanges == 2 {
+                    let imageURLString = nsString.substring(with: match.range(at: 1))
+
+                    // If it's the dynamic-image JSON, extract the first URL
+                    if imageURLString.hasPrefix("{") {
+                        if let firstURL = extractFirstURLFromJSON(imageURLString) {
+                            return absoluteURL(from: firstURL, baseURL: baseURL)
+                        }
+                    } else {
+                        return absoluteURL(from: imageURLString, baseURL: baseURL)
+                    }
+                }
+            }
+        }
+
+        // Generic patterns for other sites
+        let genericPatterns = [
+            // Large product images (common class names)
+            #"class=["\'][^"\']*product[_-]?image[^"\']*["\'][^>]*?src=["\']([^"\']+)["\']"#,
+            #"class=["\'][^"\']*main[_-]?image[^"\']*["\'][^>]*?src=["\']([^"\']+)["\']"#,
+            // High-resolution images (often >500px)
+            #"<img[^>]*?src=["\']([^"\']*(?:large|big|main|product)[^"\']*\.(?:jpg|jpeg|png|webp)[^"\']*)["\']"#
+        ]
+
+        for pattern in genericPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) {
+                let nsString = html as NSString
+                if let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: nsString.length)),
+                   match.numberOfRanges == 2 {
+                    let imageURLString = nsString.substring(with: match.range(at: 1))
+                    // Filter out tiny images (likely thumbnails/icons)
+                    if !imageURLString.contains("icon") && !imageURLString.contains("thumb") {
+                        return absoluteURL(from: imageURLString, baseURL: baseURL)
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    /// Extract first URL from Amazon's dynamic-image JSON format
+    private static func extractFirstURLFromJSON(_ jsonString: String) -> String? {
+        // Amazon's data-a-dynamic-image contains URLs as keys in JSON
+        // Example: {"https://m.media-amazon.com/images/I/71abc.jpg":[500,500],"https://..."}
+        if let regex = try? NSRegularExpression(pattern: #"(https?://[^"\']+\.(?:jpg|jpeg|png|webp))"#, options: [.caseInsensitive]) {
+            let nsString = jsonString as NSString
+            if let match = regex.firstMatch(in: jsonString, range: NSRange(location: 0, length: nsString.length)),
+               match.numberOfRanges == 2 {
+                return nsString.substring(with: match.range(at: 1))
+            }
+        }
+        return nil
     }
 
     // MARK: - JSON-LD Parsing
@@ -220,6 +364,8 @@ class URLProductExtractor {
         let nsString = html as NSString
         let matches = regex.matches(in: html, range: NSRange(location: 0, length: nsString.length))
 
+        print("URLProductExtractor: Found \(matches.count) JSON-LD blocks")
+
         for match in matches {
             if match.numberOfRanges == 2 {
                 let jsonString = nsString.substring(with: match.range(at: 1))
@@ -235,22 +381,85 @@ class URLProductExtractor {
 
     private static func extractPrice(from jsonString: String) -> String? {
         guard let data = jsonString.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              let json = try? JSONSerialization.jsonObject(with: data) else {
             return nil
         }
 
-        // Common JSON-LD price locations
-        if let offers = json["offers"] as? [String: Any],
-           let price = offers["price"] as? Double ?? Double(offers["price"] as? String ?? "") {
-            let currency = offers["priceCurrency"] as? String ?? "USD"
+        // Handle both single object and array of objects (some sites wrap in @graph)
+        let objects: [[String: Any]]
+        if let singleObject = json as? [String: Any] {
+            objects = [singleObject]
+        } else if let array = json as? [[String: Any]] {
+            objects = array
+        } else {
+            return nil
+        }
+
+        // Search through all JSON-LD objects
+        for object in objects {
+            // Check if this is a Product type
+            if let type = object["@type"] as? String, type.lowercased().contains("product") {
+                if let price = extractPriceFromObject(object) {
+                    return price
+                }
+            }
+
+            // Also check nested @graph array
+            if let graph = object["@graph"] as? [[String: Any]] {
+                for item in graph {
+                    if let type = item["@type"] as? String, type.lowercased().contains("product") {
+                        if let price = extractPriceFromObject(item) {
+                            return price
+                        }
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private static func extractPriceFromObject(_ object: [String: Any]) -> String? {
+        // Single offers object
+        if let offers = object["offers"] as? [String: Any] {
+            if let price = extractPriceValue(from: offers) {
+                return price
+            }
+        }
+
+        // Array of offers
+        if let offers = object["offers"] as? [[String: Any]] {
+            for offer in offers {
+                if let price = extractPriceValue(from: offer) {
+                    return price
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private static func extractPriceValue(from offer: [String: Any]) -> String? {
+        // Try to get price as number
+        if let price = offer["price"] as? Double {
+            let currency = offer["priceCurrency"] as? String ?? "USD"
             return formatPrice(price, currency: currency)
         }
 
-        if let offers = json["offers"] as? [[String: Any]],
-           let firstOffer = offers.first,
-           let price = firstOffer["price"] as? Double ?? Double(firstOffer["price"] as? String ?? "") {
-            let currency = firstOffer["priceCurrency"] as? String ?? "USD"
-            return formatPrice(price, currency: currency)
+        // Try to get price as string
+        if let priceString = offer["price"] as? String {
+            // Remove currency symbols and parse
+            let cleaned = priceString.replacingOccurrences(of: "[^0-9.]", with: "", options: .regularExpression)
+            if let price = Double(cleaned) {
+                let currency = offer["priceCurrency"] as? String ?? "USD"
+                return formatPrice(price, currency: currency)
+            }
+        }
+
+        // Amazon sometimes uses lowPrice/highPrice
+        if let lowPrice = offer["lowPrice"] as? Double ?? Double(offer["lowPrice"] as? String ?? "") {
+            let currency = offer["priceCurrency"] as? String ?? "USD"
+            return formatPrice(lowPrice, currency: currency)
         }
 
         return nil

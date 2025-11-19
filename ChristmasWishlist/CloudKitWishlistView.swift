@@ -221,8 +221,10 @@ struct CloudKitWishlistView: View {
                 }
             }
             .refreshable {
+                print("🔄 [REFRESH] Pull-to-refresh triggered")
                 await loadChildren()
                 await loadItems()
+                print("✅ [REFRESH] Pull-to-refresh completed with \(items.count) items")
             }
             .onChange(of: cloudKit.isSignedInToiCloud) { _, isSignedIn in
                 // Load data immediately when CloudKit is ready, regardless of tab visibility
@@ -325,10 +327,12 @@ struct CloudKitWishlistView: View {
     private func loadItems() async {
         // Wait for CloudKit to sign in first
         guard cloudKit.isSignedInToiCloud else {
+            print("⚠️ [WISHLIST] Cannot load items - not signed in to iCloud")
             return
         }
 
         let startTime = Date()
+        print("📥 [WISHLIST] Starting to load items (current count: \(items.count))")
         isLoading = true
         errorMessage = nil
 
@@ -336,12 +340,15 @@ struct CloudKitWishlistView: View {
             let records: [CKRecord]
             if let selectedOwnerID = selectedOwnerID {
                 // Fetch items for selected child
+                print("👶 [WISHLIST] Fetching items for child: \(selectedOwnerID)")
                 records = try await cloudKit.fetchFriendWishlistItems(friendRecordID: selectedOwnerID)
             } else {
                 // Fetch items for current user
+                print("👤 [WISHLIST] Fetching items for current user")
                 records = try await cloudKit.fetchMyWishlistItems()
             }
             var loadedItems = records.map { CKWishlistItem(from: $0) }
+            print("📦 [WISHLIST] Fetched \(loadedItems.count) items from CloudKit")
 
             // Load purchases for all items
             var purchaseDict: [String: CKPurchase] = [:]
@@ -357,10 +364,16 @@ struct CloudKitWishlistView: View {
                 }
             }
 
-            items = loadedItems
-            purchases = purchaseDict
-            isLoading = false
+            // Update UI with animation to ensure view refreshes
+            await MainActor.run {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    items = loadedItems
+                    purchases = purchaseDict
+                }
+                isLoading = false
+            }
             print("⏱️ [WISHLIST] Loaded \(items.count) items in \(Date().timeIntervalSince(startTime).formatted())s")
+            print("✅ [WISHLIST] UI updated with \(items.count) items, \(purchases.count) purchases")
         } catch {
             print("❌ Error loading items: \(error)")
             errorMessage = error.localizedDescription
@@ -379,13 +392,17 @@ struct CloudKitWishlistView: View {
         Task {
             do {
                 try await cloudKit.deleteWishlistItem(item.record.recordID)
-
-                // Reload in background to sync
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-                await loadItems()
+                print("✅ Item deleted successfully")
             } catch {
                 print("❌ Error deleting item: \(error)")
-                // TODO: Re-add item to UI on error
+                // Re-add item to UI on error
+                await MainActor.run {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        items.append(item)
+                        items.sort { $0.createdAt > $1.createdAt }
+                    }
+                }
+                errorMessage = "Failed to delete item: \(error.localizedDescription)"
             }
         }
     }
@@ -434,7 +451,7 @@ struct CloudKitItemDetailView: View {
 
     var body: some View {
         ZStack {
-            Color.creamBackground
+            Color.white
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -448,7 +465,7 @@ struct CloudKitItemDetailView: View {
                                 .frame(maxWidth: .infinity)
                                 .frame(maxHeight: 300)
                                 .cornerRadius(CornerRadius.md)
-                                .clipped()
+                                .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 4)
                         }
 
                         // Item name
@@ -458,7 +475,7 @@ struct CloudKitItemDetailView: View {
                             dismiss()
                         }) {
                             Text(item.name)
-                                .font(.custom("Caveat", size: 42))
+                                .font(.custom("Caveat", size: 35))
                                 .foregroundColor(.warmGray)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal)
@@ -500,54 +517,54 @@ struct CloudKitItemDetailView: View {
                             .buttonStyle(PlainButtonStyle())
                         }
 
-                        // URL Link
-                        if let url = item.url, !url.isEmpty, let urlObj = URL(string: url) {
-                            Link(destination: urlObj) {
-                                HStack {
-                                    Image(systemName: "link")
-                                    Text("Visit Link")
-                                    Spacer()
-                                    Image(systemName: "arrow.up.right")
-                                        .font(.caption)
-                                }
-                                .font(.bodyMedium)
-                                .fontWeight(.medium)
-                                .foregroundColor(.forestGreen)
-                                .padding(Spacing.md)
-                                .background(Color.creamCard)
-                                .cornerRadius(CornerRadius.md)
+                        // Delete button
+                        Button(action: {
+                            HapticManager.buttonTapped()
+                            onDelete()
+                            dismiss()
+                        }) {
+                            HStack {
+                                Image(systemName: "trash")
+                                Text("Delete")
                             }
+                            .foregroundColor(.warmGray)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, Spacing.md)
+                            .background(Color.creamCard)
+                            .cornerRadius(CornerRadius.md)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CornerRadius.md)
+                                    .stroke(Color.warmGrayLight, lineWidth: 1.5)
+                            )
                         }
                     }
                     .padding(Spacing.lg)
                     .padding(.bottom, 80)
                 }
 
-                // Delete button at bottom
-                VStack {
-                    Button(action: {
-                        HapticManager.buttonTapped()
-                        onDelete()
-                        dismiss()
-                    }) {
-                        HStack {
-                            Image(systemName: "trash")
-                            Text("Delete")
+                // Visit Link button at bottom (fixed)
+                if let url = item.url, !url.isEmpty, let urlObj = URL(string: url) {
+                    VStack {
+                        Link(destination: urlObj) {
+                            HStack {
+                                Image(systemName: "link")
+                                Text("Visit Link")
+                                Spacer()
+                                Image(systemName: "arrow.up.right")
+                                    .font(.caption)
+                            }
+                            .font(.bodyMedium)
+                            .fontWeight(.medium)
+                            .foregroundColor(.forestGreen)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, Spacing.md)
+                            .background(Color.forestGreen.opacity(0.1))
+                            .cornerRadius(CornerRadius.md)
                         }
-                        .foregroundColor(.warmGray)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, Spacing.lg)
-                        .padding(.vertical, Spacing.md)
-                        .background(Color.creamCard)
-                        .cornerRadius(CornerRadius.md)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: CornerRadius.md)
-                                .stroke(Color.warmGrayLight, lineWidth: 1.5)
-                        )
+                        .padding(Spacing.lg)
                     }
-                    .padding(Spacing.lg)
+                    .background(Color.white)
                 }
-                .background(Color.creamBackground)
             }
         }
         .navigationTitle("")

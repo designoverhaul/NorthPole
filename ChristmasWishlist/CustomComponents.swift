@@ -165,7 +165,7 @@ struct FriendRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
-            // Avatar - photo if available, otherwise first initial
+            // Avatar - photo if available, otherwise Christmas emoji
             Group {
                 if let imageData = friend.imageData,
                    let uiImage = UIImage(data: imageData) {
@@ -186,10 +186,8 @@ struct FriendRow: View {
                             )
                             .frame(width: 48, height: 48)
 
-                        Text(String(friend.name.prefix(1)))
-                            .font(.headingSmall)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
+                        Text(ChristmasEmojis.emoji(for: friend.name))
+                            .font(.system(size: 28))
                     }
                 }
             }
@@ -262,7 +260,7 @@ struct ChildRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
-            // Child icon
+            // Child icon - Christmas emoji
             ZStack {
                 Circle()
                     .fill(
@@ -274,9 +272,8 @@ struct ChildRow: View {
                     )
                     .frame(width: 36, height: 36)
 
-                Image(systemName: "figure.child")
-                    .font(.caption)
-                    .foregroundColor(.white)
+                Text(ChristmasEmojis.emoji(for: child.name))
+                    .font(.system(size: 20))
             }
 
             VStack(alignment: .leading, spacing: 4) {
