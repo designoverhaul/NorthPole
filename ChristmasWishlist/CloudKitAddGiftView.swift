@@ -10,7 +10,7 @@ import CloudKit
 
 struct CloudKitAddGiftView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var cloudKit = CloudKitManager.shared
+    @ObservedObject private var cloudKit = CloudKitManager.shared
 
     let ownerRecordID: String?
     let ownerName: String
@@ -23,7 +23,12 @@ struct CloudKitAddGiftView: View {
     @State private var showingImagePicker = false
     @State private var isSaving = false
     @State private var isExtractingData = false
+    @State private var isCleaningTitle = false
     @State private var previousURLLength = 0
+    @State private var clipboardHasContent = false
+    @State private var showingLinkHelp = false
+    @State private var errorAlertMessage: String?
+    @State private var showErrorAlert = false
     @FocusState private var focusedField: Field?
 
     enum Field {
@@ -59,7 +64,7 @@ struct CloudKitAddGiftView: View {
 
                         // Name field
                         VStack(alignment: .leading, spacing: Spacing.sm) {
-                            Text("Item Name")
+                            Text("Item")
                                 .font(.bodyMedium)
                                 .fontWeight(.semibold)
                                 .foregroundColor(.warmBlack)
@@ -75,6 +80,18 @@ struct CloudKitAddGiftView: View {
                                         .stroke(focusedField == .name ? Color.forestGreen : Color.warmGrayLight, lineWidth: 2)
                                 )
                                 .focused($focusedField, equals: .name)
+
+                            // Title cleaning indicator
+                            if isCleaningTitle {
+                                HStack(spacing: Spacing.sm) {
+                                    Text("✨")
+                                        .font(.system(size: 16))
+                                    Text("Cleaning title...")
+                                        .font(.caption)
+                                        .foregroundColor(.forestGreen)
+                                }
+                                .padding(.top, Spacing.xs)
+                            }
                         }
 
                         // URL field
@@ -85,36 +102,34 @@ struct CloudKitAddGiftView: View {
                                     .fontWeight(.semibold)
                                     .foregroundColor(.warmBlack)
 
-                                Text("(Optional)")
-                                    .font(.caption)
-                                    .foregroundColor(.warmGray)
+                                Spacer()
+
+                                Button(action: {
+                                    HapticManager.buttonTapped()
+                                    showingLinkHelp = true
+                                }) {
+                                    Image(systemName: "questionmark.circle")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.forestGreen)
+                                }
                             }
 
                             HStack(spacing: 0) {
-                                ZStack(alignment: .leading) {
-                                    if url.isEmpty {
-                                        Text("https://example.com/product")
-                                            .font(.bodyMedium)
-                                            .foregroundColor(.gray.opacity(0.5))
-                                            .padding(Spacing.md)
-                                            .allowsHitTesting(false)
-                                    }
-
-                                    TextField("", text: $url)
-                                        .font(.bodyMedium)
-                                        .foregroundColor(.warmBlack)
-                                        .keyboardType(.URL)
-                                        .autocapitalization(.none)
-                                        .padding(Spacing.md)
-                                        .focused($focusedField, equals: .url)
-                                        .tint(.forestGreen)
-                                }
+                                TextField("https://example.com/product", text: $url)
+                                    .font(.bodyMedium)
+                                    .foregroundColor(.warmBlack)
+                                    .keyboardType(.URL)
+                                    .autocapitalization(.none)
+                                    .padding(Spacing.md)
+                                    .focused($focusedField, equals: .url)
+                                    .tint(.forestGreen)
 
                                 Button(action: {
                                     if let pastedString = UIPasteboard.general.string {
                                         url = pastedString
                                     }
                                     HapticManager.buttonTapped()
+                                    checkClipboard()
                                 }) {
                                     Text("Paste")
                                         .font(.bodyMedium)
@@ -124,10 +139,10 @@ struct CloudKitAddGiftView: View {
                                         .padding(.vertical, Spacing.sm)
                                         .background(
                                             RoundedRectangle(cornerRadius: CornerRadius.sm)
-                                                .fill(UIPasteboard.general.hasStrings ? Color.forestGreen : Color.warmGrayLight)
+                                                .fill(clipboardHasContent ? Color.forestGreen : Color.warmGrayLight)
                                         )
                                 }
-                                .disabled(!UIPasteboard.general.hasStrings)
+                                .disabled(!clipboardHasContent)
                                 .padding(.trailing, Spacing.sm)
                             }
                             .background(Color.white)
@@ -143,9 +158,8 @@ struct CloudKitAddGiftView: View {
                             // Extraction indicator
                             if isExtractingData {
                                 HStack(spacing: Spacing.sm) {
-                                    ProgressView()
-                                        .scaleEffect(0.8)
-                                        .tint(.forestGreen)
+                                    Text("❄️")
+                                        .font(.system(size: 16))
                                     Text("Extracting product info...")
                                         .font(.caption)
                                         .foregroundColor(.forestGreen)
@@ -156,16 +170,10 @@ struct CloudKitAddGiftView: View {
 
                         // Description field
                         VStack(alignment: .leading, spacing: Spacing.sm) {
-                            HStack {
-                                Text("Description")
-                                    .font(.bodyMedium)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.warmBlack)
-
-                                Text("(Optional)")
-                                    .font(.caption)
-                                    .foregroundColor(.warmGray)
-                            }
+                            Text("Description")
+                                .font(.bodyMedium)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.warmBlack)
 
                             TextField("Add any notes or preferences...", text: $description, axis: .vertical)
                                 .font(.bodyMedium)
@@ -183,16 +191,10 @@ struct CloudKitAddGiftView: View {
 
                         // Photo section
                         VStack(alignment: .leading, spacing: Spacing.sm) {
-                            HStack {
-                                Text("Photo")
-                                    .font(.bodyMedium)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.warmBlack)
-
-                                Text("(Optional)")
-                                    .font(.caption)
-                                    .foregroundColor(.warmGray)
-                            }
+                            Text("Photo")
+                                .font(.bodyMedium)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.warmBlack)
 
                             if let selectedImage = selectedImage {
                                 // Show selected image
@@ -220,17 +222,11 @@ struct CloudKitAddGiftView: View {
                                 Button(action: {
                                     showingImagePicker = true
                                 }) {
-                                    HStack {
-                                        Image(systemName: "photo.badge.plus")
-                                            .font(.system(size: 24))
-
-                                        Text("Add Photo")
-                                            .font(.bodyMedium)
-                                            .fontWeight(.medium)
-                                    }
-                                    .foregroundColor(.forestGreen)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(Spacing.lg)
+                                    Image(systemName: "photo.badge.plus")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.forestGreen)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(Spacing.lg)
                                     .background(Color.white)
                                     .cornerRadius(CornerRadius.md)
                                     .overlay(
@@ -246,8 +242,8 @@ struct CloudKitAddGiftView: View {
                         Button(action: saveItem) {
                             HStack {
                                 if isSaving {
-                                    ProgressView()
-                                        .tint(.white)
+                                    Text("❄️")
+                                        .font(.system(size: 20))
                                 }
                                 Text(isSaving ? "Saving..." : "Save")
                                     .fontWeight(.semibold)
@@ -276,13 +272,40 @@ struct CloudKitAddGiftView: View {
                     }
                     .disabled(isSaving)
                 }
+
+                ToolbarItem(placement: .keyboard) {
+                    Button(action: {
+                        HapticManager.buttonTapped()
+                        focusedField = nil
+                    }) {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.forestGreen)
+                            .padding(12)
+                            .background(Color.white.opacity(0.9))
+                            .clipShape(Circle())
+                    }
+                }
             }
             .toolbarBackground(.hidden, for: .navigationBar)
             .onAppear {
                 focusedField = .name
+                checkClipboard()
             }
             .sheet(isPresented: $showingImagePicker) {
                 ImagePicker(image: $selectedImage)
+            }
+            .sheet(isPresented: $showingLinkHelp) {
+                LinkHelpView()
+            }
+            .alert("Error Saving Item", isPresented: $showErrorAlert) {
+                Button("OK", role: .cancel) {
+                    showErrorAlert = false
+                }
+            } message: {
+                if let errorMessage = errorAlertMessage {
+                    Text(errorMessage)
+                }
             }
         }
     }
@@ -314,10 +337,24 @@ struct CloudKitAddGiftView: View {
                 dismiss()
             } catch {
                 print("❌ Error saving item: \(error)")
-                // TODO: Show error alert
+                
+                // Extract user-friendly error message
+                if let ckError = error as? CKError {
+                    errorAlertMessage = ckError.userFriendlyMessage
+                } else {
+                    errorAlertMessage = error.localizedDescription
+                }
+                
+                showErrorAlert = true
                 isSaving = false
             }
         }
+    }
+
+    // MARK: - Clipboard Check
+
+    private func checkClipboard() {
+        clipboardHasContent = UIPasteboard.general.hasStrings
     }
 
     // MARK: - URL Extraction
@@ -342,15 +379,39 @@ struct CloudKitAddGiftView: View {
 
             // Fill in extracted data (only if fields are currently empty)
             if let extractedName = productData.name, name.isEmpty {
+                // Set the raw extracted name first (so user sees it immediately)
                 name = extractedName
+
+                // Then clean it up with AI
+                isCleaningTitle = true
+                let cleanedName = await XAIService.shared.cleanProductTitle(extractedName)
+                name = cleanedName
+                isCleaningTitle = false
             }
 
+            // Only use description if it's meaningfully different from the name
             if let extractedDescription = productData.description, description.isEmpty {
-                // Append price to description if available
-                if let price = productData.price {
-                    self.description = "\(extractedDescription)\n\nPrice: \(price)"
-                } else {
-                    self.description = extractedDescription
+                // Check if description is just a duplicate of the name
+                let trimmedDesc = extractedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                // Skip if:
+                // 1. Exactly the same
+                // 2. Description is just name with minor additions (< 30 chars difference)
+                let isIdentical = trimmedDesc.lowercased() == trimmedName.lowercased()
+                let isTooSimilar = trimmedDesc.count < trimmedName.count + 30 &&
+                                  trimmedDesc.lowercased().hasPrefix(trimmedName.lowercased())
+
+                if !isIdentical && !isTooSimilar {
+                    // Use the description - it has meaningful content
+                    if let price = productData.price {
+                        self.description = "\(extractedDescription)\n\nPrice: \(price)"
+                    } else {
+                        self.description = extractedDescription
+                    }
+                } else if let price = productData.price {
+                    // Description is duplicate, so only add price
+                    self.description = "Price: \(price)"
                 }
             } else if let price = productData.price, description.isEmpty {
                 // Only price available
@@ -379,13 +440,16 @@ struct CloudKitAddGiftView: View {
 
 struct CloudKitEditGiftView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var cloudKit = CloudKitManager.shared
+    @ObservedObject private var cloudKit = CloudKitManager.shared
 
     @State var item: CKWishlistItem
     let onItemUpdated: (CKWishlistItem) -> Void
     let onItemDeleted: ((String) -> Void)?
 
     @State private var isSaving = false
+    @State private var clipboardHasContent = false
+    @State private var errorAlertMessage: String?
+    @State private var showErrorAlert = false
     @FocusState private var focusedField: Field?
 
     enum Field {
@@ -406,7 +470,7 @@ struct CloudKitEditGiftView: View {
                     VStack(spacing: Spacing.lg) {
                         // Name field
                         VStack(alignment: .leading, spacing: Spacing.sm) {
-                            Text("Item Name")
+                            Text("Item")
                                 .font(.bodyMedium)
                                 .fontWeight(.semibold)
                                 .foregroundColor(.warmBlack)
@@ -428,33 +492,24 @@ struct CloudKitEditGiftView: View {
                                 .foregroundColor(.warmBlack)
 
                             HStack(spacing: 0) {
-                                ZStack(alignment: .leading) {
-                                    if (item.url ?? "").isEmpty {
-                                        Text("https://example.com/product")
-                                            .font(.bodyMedium)
-                                            .foregroundColor(.gray.opacity(0.5))
-                                            .padding(Spacing.md)
-                                            .allowsHitTesting(false)
-                                    }
-
-                                    TextField("", text: Binding(
-                                        get: { item.url ?? "" },
-                                        set: { item.url = $0.isEmpty ? nil : $0 }
-                                    ))
-                                        .font(.bodyMedium)
-                                        .foregroundColor(.warmBlack)
-                                        .keyboardType(.URL)
-                                        .autocapitalization(.none)
-                                        .padding(Spacing.md)
-                                        .focused($focusedField, equals: .url)
-                                        .tint(.forestGreen)
-                                }
+                                TextField("https://example.com/product", text: Binding(
+                                    get: { item.url ?? "" },
+                                    set: { item.url = $0.isEmpty ? nil : $0 }
+                                ))
+                                    .font(.bodyMedium)
+                                    .foregroundColor(.warmBlack)
+                                    .keyboardType(.URL)
+                                    .autocapitalization(.none)
+                                    .padding(Spacing.md)
+                                    .focused($focusedField, equals: .url)
+                                    .tint(.forestGreen)
 
                                 Button(action: {
                                     if let pastedString = UIPasteboard.general.string {
                                         item.url = pastedString
                                     }
                                     HapticManager.buttonTapped()
+                                    checkClipboard()
                                 }) {
                                     Text("Paste")
                                         .font(.bodyMedium)
@@ -464,10 +519,10 @@ struct CloudKitEditGiftView: View {
                                         .padding(.vertical, Spacing.sm)
                                         .background(
                                             RoundedRectangle(cornerRadius: CornerRadius.sm)
-                                                .fill(UIPasteboard.general.hasStrings ? Color.forestGreen : Color.warmGrayLight)
+                                                .fill(clipboardHasContent ? Color.forestGreen : Color.warmGrayLight)
                                         )
                                 }
-                                .disabled(!UIPasteboard.general.hasStrings)
+                                .disabled(!clipboardHasContent)
                                 .padding(.trailing, Spacing.sm)
                             }
                             .background(Color.white)
@@ -498,8 +553,8 @@ struct CloudKitEditGiftView: View {
                         Button(action: saveItem) {
                             HStack {
                                 if isSaving {
-                                    ProgressView()
-                                        .tint(.white)
+                                    Text("❄️")
+                                        .font(.system(size: 20))
                                 }
                                 Text(isSaving ? "Saving..." : "Save Changes")
                                     .fontWeight(.semibold)
@@ -546,8 +601,38 @@ struct CloudKitEditGiftView: View {
                     }
                     .disabled(isSaving)
                 }
+
+                ToolbarItem(placement: .keyboard) {
+                    Button(action: {
+                        HapticManager.buttonTapped()
+                        focusedField = nil
+                    }) {
+                        Image(systemName: "keyboard.chevron.compact.down")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.forestGreen)
+                            .padding(12)
+                            .background(Color.white.opacity(0.9))
+                            .clipShape(Circle())
+                    }
+                }
+            }
+            .onAppear {
+                checkClipboard()
+            }
+            .alert("Error", isPresented: $showErrorAlert) {
+                Button("OK", role: .cancel) {
+                    showErrorAlert = false
+                }
+            } message: {
+                if let errorMessage = errorAlertMessage {
+                    Text(errorMessage)
+                }
             }
         }
+    }
+
+    private func checkClipboard() {
+        clipboardHasContent = UIPasteboard.general.hasStrings
     }
 
     private func saveItem() {
@@ -561,6 +646,15 @@ struct CloudKitEditGiftView: View {
                 dismiss()
             } catch {
                 print("❌ Error updating item: \(error)")
+                
+                // Extract user-friendly error message
+                if let ckError = error as? CKError {
+                    errorAlertMessage = ckError.userFriendlyMessage
+                } else {
+                    errorAlertMessage = error.localizedDescription
+                }
+                
+                showErrorAlert = true
                 isSaving = false
             }
         }
@@ -577,6 +671,15 @@ struct CloudKitEditGiftView: View {
                 dismiss()
             } catch {
                 print("❌ Error deleting item: \(error)")
+                
+                // Extract user-friendly error message
+                if let ckError = error as? CKError {
+                    errorAlertMessage = ckError.userFriendlyMessage
+                } else {
+                    errorAlertMessage = error.localizedDescription
+                }
+                
+                showErrorAlert = true
                 isSaving = false
             }
         }

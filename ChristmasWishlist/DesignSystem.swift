@@ -99,7 +99,7 @@ struct DesignShadow {
 
 // MARK: - Christmas Emoji Collection
 enum ChristmasEmojis {
-    static let all = ["🔔", "🎁", "👶", "🕯️", "🎅", "👼", "🎶", "🤶", "❄️", "☃️", "⛄", "🌟", "🔥", "🎄", "🍷", "🦌", "🍪", "🥛", "🧝‍♀️", "🧦", "🧑‍🎄", "🧝", "🌨️", "⭐", "🍰", "🍫", "🍬"]
+    static let all = ["🔔", "🎁", "🕯️", "🎅", "👼", "🎶", "🤶", "❄️", "☃️", "⛄", "🎄", "🦌", "🍪", "🥛", "🧝‍♀️", "🧦", "🧝", "⭐", "🍫", "🍬"]
 
     /// Returns a consistent Christmas emoji for a given seed string (e.g., name or ID)
     static func emoji(for seed: String) -> String {
@@ -115,6 +115,9 @@ struct GoldGradientTitle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(Color.creamBackground, for: .navigationBar)
+            .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text(text)
@@ -129,15 +132,72 @@ struct GoldGradientTitle: ViewModifier {
                         .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
                 }
             }
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(Color.creamBackground, for: .navigationBar)
-            .toolbarTitleDisplayMode(.inline)
     }
 }
 
 extension View {
     func goldTitle(_ text: String) -> some View {
         modifier(GoldGradientTitle(text: text))
+    }
+    
+    func goldTitleWithShareButton(_ text: String, action: @escaping () -> Void) -> some View {
+        self
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(Color.creamBackground, for: .navigationBar)
+            .toolbarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(text)
+                        .font(.system(size: 28, weight: .bold, design: .serif))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.gold, Color.goldShimmer, Color.gold],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: action) {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundColor(.forestGreen)
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                }
+            }
+    }
+    
+    func goldTitleWithMenu<Content: View>(_ text: String, @ViewBuilder menuContent: () -> Content) -> some View {
+        self
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(Color.creamBackground, for: .navigationBar)
+            .toolbarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(text)
+                        .font(.system(size: 28, weight: .bold, design: .serif))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.gold, Color.goldShimmer, Color.gold],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        menuContent()
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundColor(.forestGreen)
+                            .font(.system(size: 18, weight: .semibold))
+                    }
+                }
+            }
     }
 
     func friendNameTitle(_ fullName: String) -> some View {
@@ -177,8 +237,8 @@ struct FriendNameTitle: ViewModifier {
                         .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-                        .padding(.top, 8)
-                        .padding(.bottom, 12)
+                        .padding(.top, 0)
+                        .padding(.bottom, 8)
                         .frame(maxWidth: .infinity)
                         .background(Color.creamBackground)
                 }

@@ -15,12 +15,13 @@ class CloudKitManager: ObservableObject {
     static let shared = CloudKitManager()
 
     private let container: CKContainer
-    private let publicDatabase: CKDatabase
+    let publicDatabase: CKDatabase
     private let privateDatabase: CKDatabase
 
     @Published var currentUserRecordID: CKRecord.ID?
     @Published var isSignedInToiCloud = false
     @Published var shouldRefreshFriends = false
+    @Published var shouldRefreshChildren = false
     @Published var cachedFriends: [CKFriend] = []
     @Published var cachedFriendItemCounts: [String: Int] = [:]
     @Published var isPreloadingFriends = false
@@ -122,11 +123,19 @@ class CloudKitManager: ObservableObject {
         query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
 
         // Fetch from PUBLIC database
-        let (results, _) = try await publicDatabase.records(matching: query)
-        let records = results.compactMap { try? $0.1.get() }
+        var allRecords: [CKRecord] = []
+        
+        var (matchResults, cursor) = try await publicDatabase.records(matching: query)
+        allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+        
+        // Continue fetching if there is a cursor
+        while let currentCursor = cursor {
+            (matchResults, cursor) = try await publicDatabase.records(continuingMatchFrom: currentCursor)
+            allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+        }
 
-        print("☁️ CloudKit: Fetched \(records.count) MY wishlist items from PUBLIC database")
-        return records
+        print("☁️ CloudKit: Fetched \(allRecords.count) MY wishlist items from PUBLIC database")
+        return allRecords
     }
 
     func fetchFriendWishlistItems(friendRecordID: String) async throws -> [CKRecord] {
@@ -135,11 +144,39 @@ class CloudKitManager: ObservableObject {
         query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
 
         // Fetch from PUBLIC database
-        let (results, _) = try await publicDatabase.records(matching: query)
-        let records = results.compactMap { try? $0.1.get() }
+        var allRecords: [CKRecord] = []
+        
+        var (matchResults, cursor) = try await publicDatabase.records(matching: query)
+        allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+        
+        // Continue fetching if there is a cursor
+        while let currentCursor = cursor {
+            (matchResults, cursor) = try await publicDatabase.records(continuingMatchFrom: currentCursor)
+            allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+        }
 
-        print("☁️ CloudKit: Fetched \(records.count) items for friend \(friendRecordID)")
-        return records
+        print("☁️ CloudKit: Fetched \(allRecords.count) items for friend \(friendRecordID)")
+        return allRecords
+    }
+
+    func fetchAllWishlistItems() async throws -> [CKRecord] {
+        // Fetch ALL wishlist items from PUBLIC database (no filter)
+        let query = CKQuery(recordType: RecordType.wishlistItem.rawValue, predicate: NSPredicate(value: true))
+        query.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: false)]
+
+        var allRecords: [CKRecord] = []
+
+        var (matchResults, cursor) = try await publicDatabase.records(matching: query)
+        allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+
+        // Continue fetching if there is a cursor
+        while let currentCursor = cursor {
+            (matchResults, cursor) = try await publicDatabase.records(continuingMatchFrom: currentCursor)
+            allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+        }
+
+        print("☁️ CloudKit: Fetched \(allRecords.count) TOTAL wishlist items from PUBLIC database")
+        return allRecords
     }
 
     func deleteWishlistItem(_ recordID: CKRecord.ID) async throws {
@@ -154,31 +191,45 @@ class CloudKitManager: ObservableObject {
 
     // MARK: - Friends
 
-    func saveFriend(name: String, phoneNumber: String?, email: String?, imageData: Data?, friendUserRecordID: String?) async throws -> CKRecord {
+    func saveFriend(name: String, phoneNumber: String?, email: String?, friendUserRecordID: String?, imageData: Data?) async throws -> CKRecord {
+        // Wait for CloudKit to be fully initialized (max 10 seconds)
+        var retries = 0
+        while currentUserRecordID == nil && retries < 20 {
+            print("⏳ [SAVE_FRIEND] Waiting for CloudKit initialization... (attempt \(retries + 1)/20)")
+            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            retries += 1
+        }
+
         guard let userRecordID = currentUserRecordID else {
+            print("❌ [SAVE_FRIEND] CloudKit not initialized after waiting")
+            print("❌ [SAVE_FRIEND] isSignedInToiCloud: \(isSignedInToiCloud)")
             throw CloudKitError.notSignedIn
         }
+
+        print("✅ [SAVE_FRIEND] CloudKit initialized, proceeding with save...")
 
         let record = CKRecord(recordType: RecordType.friend.rawValue)
         record["name"] = name as CKRecordValue
         record["phoneNumber"] = (phoneNumber ?? "") as CKRecordValue
         record["email"] = (email ?? "") as CKRecordValue
-        record["ownerID"] = userRecordID.recordName as CKRecordValue
         record["friendUserRecordID"] = (friendUserRecordID ?? "") as CKRecordValue
+        record["ownerID"] = userRecordID.recordName as CKRecordValue
         record["addedAt"] = Date() as CKRecordValue
 
-        // Handle image
+        // Handle photo
         if let imageData = imageData, let image = UIImage(data: imageData) {
             if let asset = try? createImageAsset(from: image) {
                 record["photo"] = asset
             }
         }
 
+        // Save to PRIVATE database (friends are private to each user)
         let savedRecord = try await privateDatabase.save(record)
-        print("☁️ CloudKit: Saved friend: \(name)")
+        print("☁️ CloudKit: Saved friend to PRIVATE database: \(name)")
         return savedRecord
     }
 
+    /// Fetch friends from CloudKit
     func fetchMyFriends() async throws -> [CKRecord] {
         guard let userRecordID = currentUserRecordID else {
             throw CloudKitError.notSignedIn
@@ -188,16 +239,24 @@ class CloudKitManager: ObservableObject {
         let query = CKQuery(recordType: RecordType.friend.rawValue, predicate: predicate)
         query.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
 
-        let (results, _) = try await privateDatabase.records(matching: query)
-        let records = results.compactMap { try? $0.1.get() }
+        var allRecords: [CKRecord] = []
 
-        print("☁️ CloudKit: Fetched \(records.count) friends")
-        return records
+        var (matchResults, cursor) = try await privateDatabase.records(matching: query)
+        allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+
+        // Continue fetching if there is a cursor
+        while let currentCursor = cursor {
+            (matchResults, cursor) = try await privateDatabase.records(continuingMatchFrom: currentCursor)
+            allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+        }
+
+        print("☁️ CloudKit: Fetched \(allRecords.count) friends from PRIVATE database")
+        return allRecords
     }
 
     func deleteFriend(_ recordID: CKRecord.ID) async throws {
         try await privateDatabase.deleteRecord(withID: recordID)
-        print("☁️ CloudKit: Deleted friend")
+        print("☁️ CloudKit: Deleted friend from PRIVATE database")
     }
 
     func hideChildFromFriend(friendRecordID: CKRecord.ID, childRecordID: String) async throws {
@@ -233,76 +292,7 @@ class CloudKitManager: ObservableObject {
     }
 
     /// Preload friends data in background for instant display when user navigates to Friends tab
-    func preloadFriendsData() async {
-        let startTime = Date()
-        print("⏱️ [PRELOAD] Starting friends preload...")
-
-        isPreloadingFriends = true
-        defer { isPreloadingFriends = false }
-
-        do {
-            // Fetch friends
-            let fetchStart = Date()
-            let records = try await fetchMyFriends()
-            print("⏱️ [PRELOAD] Fetched \(records.count) friend records in \(Date().timeIntervalSince(fetchStart).formatted())s")
-
-            // Fetch children for each friend who has the app
-            var friendsWithChildren: [CKFriend] = []
-            var itemCounts: [String: Int] = [:]
-
-            for record in records {
-                let friendRecordID = record["friendUserRecordID"] as? String
-                var children: [CKChild] = []
-
-                if let friendRecordID = friendRecordID, !friendRecordID.isEmpty {
-                    let childFetchStart = Date()
-                    do {
-                        let childRecords = try await fetchChildrenForUser(userRecordID: friendRecordID)
-                        children = childRecords.map { CKChild(from: $0) }
-                        print("⏱️ [PRELOAD] Fetched \(children.count) children for friend in \(Date().timeIntervalSince(childFetchStart).formatted())s")
-                    } catch let error as CKError where error.code == .unknownItem {
-                        print("☁️ [PRELOAD] Child record type not created yet")
-                        children = []
-                    } catch {
-                        print("❌ [PRELOAD] Error fetching children: \(error)")
-                    }
-                }
-
-                friendsWithChildren.append(CKFriend(from: record, children: children))
-            }
-
-            // Fetch item counts for friends and children
-            for friend in friendsWithChildren where friend.hasApp {
-                guard let friendRecordID = friend.friendUserRecordID else { continue }
-
-                // Load item count for friend
-                do {
-                    let items = try await fetchFriendWishlistItems(friendRecordID: friendRecordID)
-                    itemCounts[friendRecordID] = items.count
-                } catch {
-                    print("❌ [PRELOAD] Error loading item count for \(friend.name): \(error)")
-                }
-
-                // Load item counts for friend's children
-                for child in friend.children {
-                    do {
-                        let items = try await fetchFriendWishlistItems(friendRecordID: child.id)
-                        itemCounts[child.id] = items.count
-                    } catch {
-                        print("❌ [PRELOAD] Error loading item count for \(child.name): \(error)")
-                    }
-                }
-            }
-
-            // Update cached data on main actor
-            cachedFriends = friendsWithChildren
-            cachedFriendItemCounts = itemCounts
-
-            print("⏱️ [PRELOAD] Completed in \(Date().timeIntervalSince(startTime).formatted())s - cached \(friendsWithChildren.count) friends")
-        } catch {
-            print("❌ [PRELOAD] Failed after \(Date().timeIntervalSince(startTime).formatted())s: \(error.localizedDescription)")
-        }
-    }
+    // preloadFriendsData removed - friends are now stored locally and loaded in FriendsListView
 
     // MARK: - Children
 
@@ -313,6 +303,23 @@ class CloudKitManager: ObservableObject {
 
         // Use provided parent ID or default to current user
         let parentID = parentUserRecordID ?? userRecordID.recordName
+
+        // Check for existing child with same name and parent to prevent duplicates
+        let existingPredicate = NSPredicate(format: "name == %@ AND parentUserRecordID == %@", name, parentID)
+        let existingQuery = CKQuery(recordType: RecordType.child.rawValue, predicate: existingPredicate)
+        
+        do {
+            let (existingResults, _) = try await publicDatabase.records(matching: existingQuery)
+            let existingRecords = existingResults.compactMap { try? $0.1.get() }
+            
+            if let existingRecord = existingRecords.first {
+                print("☁️ CloudKit: Child '\(name)' already exists for parent \(parentID), returning existing record")
+                return existingRecord
+            }
+        } catch {
+            // If query fails (e.g., record type doesn't exist yet), continue to create new record
+            print("ℹ️ CloudKit: Could not check for existing child (this is normal on first run): \(error)")
+        }
 
         let record = CKRecord(recordType: RecordType.child.rawValue)
         record["name"] = name as CKRecordValue
@@ -339,11 +346,24 @@ class CloudKitManager: ObservableObject {
         query.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
 
         // Fetch from PUBLIC database
-        let (results, _) = try await publicDatabase.records(matching: query)
-        let records = results.compactMap { try? $0.1.get() }
+        var allRecords: [CKRecord] = []
+        
+        var (matchResults, cursor) = try await publicDatabase.records(matching: query)
+        allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+        
+        // Continue fetching if there is a cursor
+        while let currentCursor = cursor {
+            (matchResults, cursor) = try await publicDatabase.records(continuingMatchFrom: currentCursor)
+            allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+        }
 
-        print("☁️ CloudKit: Fetched \(records.count) children for user \(userRecordID)")
-        return records
+        print("☁️ CloudKit: Fetched \(allRecords.count) children for user \(userRecordID)")
+        return allRecords
+    }
+
+    func fetchChildRecord(byID childRecordID: String) async throws -> CKRecord {
+        let recordID = CKRecord.ID(recordName: childRecordID)
+        return try await publicDatabase.record(for: recordID)
     }
 
     func deleteChild(_ childRecordID: CKRecord.ID) async throws {
@@ -368,9 +388,21 @@ class CloudKitManager: ObservableObject {
     // MARK: - Purchases
 
     func savePurchase(itemRecordID: String) async throws -> CKRecord {
+        // Wait for CloudKit to be fully initialized (max 10 seconds)
+        var retries = 0
+        while currentUserRecordID == nil && retries < 20 {
+            print("⏳ [SAVE_PURCHASE] Waiting for CloudKit initialization... (attempt \(retries + 1)/20)")
+            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            retries += 1
+        }
+
         guard let userRecordID = currentUserRecordID else {
+            print("❌ [SAVE_PURCHASE] CloudKit not initialized after waiting")
+            print("❌ [SAVE_PURCHASE] isSignedInToiCloud: \(isSignedInToiCloud)")
             throw CloudKitError.notSignedIn
         }
+
+        print("✅ [SAVE_PURCHASE] CloudKit initialized, proceeding with save...")
 
         let record = CKRecord(recordType: RecordType.purchase.rawValue)
         record["itemRecordID"] = itemRecordID as CKRecordValue
@@ -389,11 +421,18 @@ class CloudKitManager: ObservableObject {
         query.sortDescriptors = [NSSortDescriptor(key: "purchasedAt", ascending: false)]
 
         do {
-            let (results, _) = try await publicDatabase.records(matching: query)
-            let records = results.compactMap { try? $0.1.get() }
+            var allRecords: [CKRecord] = []
+            
+            var (matchResults, cursor) = try await publicDatabase.records(matching: query)
+            allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+            
+            while let currentCursor = cursor {
+                (matchResults, cursor) = try await publicDatabase.records(continuingMatchFrom: currentCursor)
+                allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+            }
 
-            print("☁️ CloudKit: Fetched \(records.count) purchases for item \(itemRecordID)")
-            return records
+            print("☁️ CloudKit: Fetched \(allRecords.count) purchases for item \(itemRecordID)")
+            return allRecords
         } catch let error as CKError where error.code == .unknownItem {
             // Record type doesn't exist yet - this is fine, just means no purchases exist
             print("ℹ️ CloudKit: Purchase record type doesn't exist yet (will be created on first save)")
@@ -411,11 +450,18 @@ class CloudKitManager: ObservableObject {
         query.sortDescriptors = [NSSortDescriptor(key: "purchasedAt", ascending: false)]
 
         do {
-            let (results, _) = try await publicDatabase.records(matching: query)
-            let records = results.compactMap { try? $0.1.get() }
+            var allRecords: [CKRecord] = []
+            
+            var (matchResults, cursor) = try await publicDatabase.records(matching: query)
+            allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+            
+            while let currentCursor = cursor {
+                (matchResults, cursor) = try await publicDatabase.records(continuingMatchFrom: currentCursor)
+                allRecords.append(contentsOf: matchResults.compactMap { try? $0.1.get() })
+            }
 
-            print("☁️ CloudKit: Fetched \(records.count) my purchases")
-            return records
+            print("☁️ CloudKit: Fetched \(allRecords.count) my purchases")
+            return allRecords
         } catch let error as CKError where error.code == .unknownItem {
             // Record type doesn't exist yet - this is fine, just means no purchases exist
             print("ℹ️ CloudKit: Purchase record type doesn't exist yet (will be created on first save)")
@@ -430,57 +476,12 @@ class CloudKitManager: ObservableObject {
 
     // MARK: - User Discovery
 
-    func requestDiscoverabilityPermission() async throws -> Bool {
-        return try await withCheckedThrowingContinuation { continuation in
-            container.status(forApplicationPermission: .userDiscoverability) { status, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-
-                switch status {
-                case .granted:
-                    print("☁️ CloudKit: User discoverability permission already granted")
-                    continuation.resume(returning: true)
-
-                case .denied:
-                    print("❌ CloudKit: User discoverability permission denied")
-                    continuation.resume(returning: false)
-
-                case .couldNotComplete:
-                    print("❌ CloudKit: Could not determine discoverability permission status")
-                    continuation.resume(returning: false)
-
-                case .initialState:
-                    // Request permission
-                    print("☁️ CloudKit: Requesting user discoverability permission...")
-                    self.container.requestApplicationPermission(.userDiscoverability) { newStatus, requestError in
-                        if let requestError = requestError {
-                            print("❌ CloudKit: Error requesting permission: \(requestError.localizedDescription)")
-                            continuation.resume(returning: false)
-                        } else {
-                            let granted = newStatus == .granted
-                            print(granted ? "✅ CloudKit: User discoverability permission granted" : "❌ CloudKit: User discoverability permission denied")
-                            continuation.resume(returning: granted)
-                        }
-                    }
-
-                @unknown default:
-                    continuation.resume(returning: false)
-                }
-            }
-        }
-    }
+    // requestDiscoverabilityPermission removed - deprecated in iOS 17
 
     func discoverUserByPhoneNumber(_ phoneNumber: String) async throws -> CKRecord.ID? {
-        print("🔍 Attempting to discover user by phone: \(phoneNumber)")
-
-        // First check/request permission for user discoverability
-        let hasPermission = try await requestDiscoverabilityPermission()
-        guard hasPermission else {
-            print("❌ Cannot discover users: permission not granted")
-            return nil
-        }
+        let cleanPhone = phoneNumber.filter { $0.isNumber }
+        print("🔍 [DISCOVERY] Attempting to discover user by phone: \(phoneNumber)")
+        print("🔍 [DISCOVERY] Cleaned phone number: \(cleanPhone)")
 
         return try await withCheckedThrowingContinuation { continuation in
             container.discoverUserIdentity(withPhoneNumber: phoneNumber) { userIdentity, error in
@@ -488,23 +489,45 @@ class CloudKitManager: ObservableObject {
                     let ckError = error as? CKError
                     switch ckError?.code {
                     case .unknownItem:
-                        print("ℹ️ No user found with phone: \(phoneNumber)")
+                        print("ℹ️ [DISCOVERY] No user found with phone: \(phoneNumber)")
+                        print("ℹ️ [DISCOVERY] Possible reasons:")
+                        print("   1. User hasn't installed the app or hasn't opened it yet")
+                        print("   2. User hasn't enabled 'Look Me Up by Email' in iCloud settings")
+                        print("   3. Phone number doesn't match their Apple ID phone number")
                         continuation.resume(returning: nil)
                     case .networkFailure, .networkUnavailable:
-                        print("❌ Network error during user discovery: \(error.localizedDescription)")
+                        print("❌ [DISCOVERY] Network error during user discovery: \(error.localizedDescription)")
                         continuation.resume(throwing: error)
+                    case .permissionFailure:
+                        print("❌ [DISCOVERY] Permission failure - user may have discovery disabled")
+                        continuation.resume(returning: nil)
                     default:
-                        print("❌ CloudKit error during user discovery: \(error.localizedDescription)")
+                        print("❌ [DISCOVERY] CloudKit error during user discovery: \(error.localizedDescription)")
+                        if let ckError = ckError {
+                            print("❌ [DISCOVERY] Error code: \(ckError.code.rawValue)")
+                            print("❌ [DISCOVERY] Full error: \(ckError)")
+                        }
                         continuation.resume(returning: nil)
                     }
                     return
                 }
 
-                if let userIdentity = userIdentity, let recordID = userIdentity.userRecordID {
-                    print("✅ Found user with phone record ID: \(recordID.recordName)")
-                    continuation.resume(returning: recordID)
+                if let userIdentity = userIdentity {
+                    print("📋 [DISCOVERY] UserIdentity object exists")
+                    print("📋 [DISCOVERY] - lookupInfo: \(String(describing: userIdentity.lookupInfo))")
+                    print("📋 [DISCOVERY] - userRecordID: \(String(describing: userIdentity.userRecordID))")
+                    print("📋 [DISCOVERY] - hasiCloudAccount: \(userIdentity.hasiCloudAccount)")
+
+                    if let recordID = userIdentity.userRecordID {
+                        print("✅ [DISCOVERY] Found user with phone! Record ID: \(recordID.recordName)")
+                        continuation.resume(returning: recordID)
+                    } else {
+                        print("⚠️ [DISCOVERY] UserIdentity exists but userRecordID is nil")
+                        print("⚠️ [DISCOVERY] This means CloudKit found the contact but user hasn't created a record yet")
+                        continuation.resume(returning: nil)
+                    }
                 } else {
-                    print("ℹ️ User identity found but no record ID available")
+                    print("❌ [DISCOVERY] UserIdentity is completely nil (no match found)")
                     continuation.resume(returning: nil)
                 }
             }
@@ -512,14 +535,7 @@ class CloudKitManager: ObservableObject {
     }
 
     func discoverUserByEmail(_ email: String) async throws -> CKRecord.ID? {
-        print("🔍 Attempting to discover user by email: \(email)")
-
-        // First check/request permission for user discoverability
-        let hasPermission = try await requestDiscoverabilityPermission()
-        guard hasPermission else {
-            print("❌ Cannot discover users: permission not granted")
-            return nil
-        }
+        print("🔍 [DISCOVERY] Attempting to discover user by email: \(email)")
 
         return try await withCheckedThrowingContinuation { continuation in
             container.discoverUserIdentity(withEmailAddress: email) { userIdentity, error in
@@ -527,31 +543,57 @@ class CloudKitManager: ObservableObject {
                     let ckError = error as? CKError
                     switch ckError?.code {
                     case .unknownItem:
-                        print("ℹ️ No user found with email: \(email)")
+                        print("ℹ️ [DISCOVERY] No user found with email: \(email)")
+                        print("ℹ️ [DISCOVERY] Possible reasons:")
+                        print("   1. User hasn't installed the app or hasn't opened it yet")
+                        print("   2. User hasn't enabled 'Look Me Up by Email' in iCloud settings")
+                        print("   3. Email doesn't match their Apple ID email")
                         continuation.resume(returning: nil)
                     case .networkFailure, .networkUnavailable:
-                        print("❌ Network error during user discovery: \(error.localizedDescription)")
+                        print("❌ [DISCOVERY] Network error during user discovery: \(error.localizedDescription)")
                         continuation.resume(throwing: error)
+                    case .permissionFailure:
+                        print("❌ [DISCOVERY] Permission failure - user may have discovery disabled")
+                        continuation.resume(returning: nil)
                     default:
-                        print("❌ CloudKit error during user discovery: \(error.localizedDescription)")
+                        print("❌ [DISCOVERY] CloudKit error during user discovery: \(error.localizedDescription)")
+                        if let ckError = ckError {
+                            print("❌ [DISCOVERY] Error code: \(ckError.code.rawValue)")
+                            print("❌ [DISCOVERY] Full error: \(ckError)")
+                        }
                         continuation.resume(returning: nil)
                     }
                     return
                 }
 
-                if let userIdentity = userIdentity, let recordID = userIdentity.userRecordID {
-                    print("✅ Found user with email record ID: \(recordID.recordName)")
-                    continuation.resume(returning: recordID)
+                if let userIdentity = userIdentity {
+                    print("📋 [DISCOVERY] UserIdentity object exists")
+                    print("📋 [DISCOVERY] - lookupInfo: \(String(describing: userIdentity.lookupInfo))")
+                    print("📋 [DISCOVERY] - userRecordID: \(String(describing: userIdentity.userRecordID))")
+                    print("📋 [DISCOVERY] - hasiCloudAccount: \(userIdentity.hasiCloudAccount)")
+
+                    if let recordID = userIdentity.userRecordID {
+                        print("✅ [DISCOVERY] Found user with email! Record ID: \(recordID.recordName)")
+                        continuation.resume(returning: recordID)
+                    } else {
+                        print("⚠️ [DISCOVERY] UserIdentity exists but userRecordID is nil")
+                        print("⚠️ [DISCOVERY] This means CloudKit found the contact but user hasn't created a record yet")
+                        continuation.resume(returning: nil)
+                    }
                 } else {
-                    print("ℹ️ User identity found but no record ID available")
+                    print("❌ [DISCOVERY] UserIdentity is completely nil (no match found)")
                     continuation.resume(returning: nil)
                 }
             }
         }
     }
 
-    /// Discover a user by trying both phone number and email
-    func discoverUser(phoneNumber: String?, email: String?) async throws -> CKRecord.ID? {
+    /// Discover a user by trying multiple phone numbers and emails
+    func discoverUser(phoneNumbers: [String], emails: [String]) async throws -> CKRecord.ID? {
+        print("🔍 [DISCOVERY] ===== Starting User Discovery =====")
+        print("🔍 [DISCOVERY] Phone numbers to try: \(phoneNumbers.count)")
+        print("🔍 [DISCOVERY] Emails to try: \(emails.count)")
+
         // First check if we're trying to discover ourselves
         // CloudKit discovery doesn't work for your own account, so check directly
         if let myRecordID = currentUserRecordID {
@@ -580,23 +622,43 @@ class CloudKitManager: ObservableObject {
             // Note: We can't reliably compare contact info due to API limitations
             // Just log that we tried
             if myUserIdentity != nil {
-                print("ℹ️ Checked current user identity for self-match")
+                print("ℹ️ [DISCOVERY] Checked current user identity for self-match")
             }
         }
 
-        // Try phone number first (more reliable)
-        if let phoneNumber = phoneNumber, !phoneNumber.isEmpty {
-            if let recordID = try await discoverUserByPhoneNumber(phoneNumber) {
-                return recordID
+        // Try all phone numbers first (more reliable)
+        print("🔍 [DISCOVERY] Trying phone numbers...")
+        for (index, phoneNumber) in phoneNumbers.enumerated() {
+            if !phoneNumber.isEmpty {
+                print("🔍 [DISCOVERY] Phone \(index + 1)/\(phoneNumbers.count): \(phoneNumber)")
+                if let recordID = try await discoverUserByPhoneNumber(phoneNumber) {
+                    print("✅ [DISCOVERY] SUCCESS! Found user via phone number")
+                    return recordID
+                }
             }
         }
 
-        // Fall back to email
-        if let email = email, !email.isEmpty {
-            if let recordID = try await discoverUserByEmail(email) {
-                return recordID
+        print("🔍 [DISCOVERY] No phone numbers worked, trying emails...")
+
+        // Fall back to emails
+        for (index, email) in emails.enumerated() {
+            if !email.isEmpty {
+                print("🔍 [DISCOVERY] Email \(index + 1)/\(emails.count): \(email)")
+                if let recordID = try await discoverUserByEmail(email) {
+                    print("✅ [DISCOVERY] SUCCESS! Found user via email")
+                    return recordID
+                }
             }
         }
+
+        print("❌ [DISCOVERY] ===== Discovery Failed =====")
+        print("❌ [DISCOVERY] User not found via any phone or email")
+        print("❌ [DISCOVERY] Next steps:")
+        print("   1. Ask user to open the app at least once (creates CloudKit user record)")
+        print("   2. Verify Settings > [Apple ID] > iCloud > 'Look Me Up by Email' is ON")
+        print("   3. Confirm they're signed in to iCloud on the device")
+        print("   4. Wait 1-2 minutes after first app launch for CloudKit to sync")
+        print("   5. If still failing, use 'Force Link Friend' with their Record ID")
 
         return nil
     }
@@ -946,15 +1008,7 @@ extension CKError {
     var userFriendlyMessage: String {
         switch self.code {
         case .quotaExceeded:
-            if let retryAfter = self.retryAfterSeconds {
-                let minutes = Int(retryAfter / 60)
-                if minutes > 0 {
-                    return "CloudKit quota exceeded. Please wait about \(minutes) minute\(minutes == 1 ? "" : "s") and try again.\n\nThis happens during testing with frequent operations."
-                } else {
-                    return "CloudKit quota exceeded. Please wait a moment and try again."
-                }
-            }
-            return "CloudKit quota exceeded. Please try again in a few minutes."
+            return "Your iCloud storage is full. Others will not be able to see your wishlist. Please go to Settings > Your Name > iCloud to free up space and try again."
 
         case .networkFailure, .networkUnavailable:
             return "Network connection issue. Please check your internet connection."
@@ -987,5 +1041,226 @@ extension CKError {
         default:
             return false
         }
+    }
+}
+
+// MARK: - Account Wipe (Current User Only)
+
+extension CloudKitManager {
+    /// Permanently deletes all CloudKit data owned by the current user for this app.
+    /// This is scoped strictly to the signed-in iCloud account and will not touch other users' data.
+    func wipeCurrentUserData() async throws {
+        guard let userRecordID = currentUserRecordID else {
+            throw CloudKitError.notSignedIn
+        }
+
+        let ownerName = userRecordID.recordName
+        print("🧨 [WIPE] Starting full CloudKit wipe for current user: \(ownerName)")
+
+        var deletedItemIDs: [String] = []
+
+        // Helper to delete wishlist items matching a predicate, tracking their IDs
+        func deleteWishlistItems(matching predicate: NSPredicate, context: String) async {
+            let query = CKQuery(recordType: RecordType.wishlistItem.rawValue, predicate: predicate)
+            var totalDeleted = 0
+
+            do {
+                var (results, cursor) = try await publicDatabase.records(matching: query)
+                try await deleteWishlistBatch(results: results, totalDeleted: &totalDeleted, context: context)
+
+                var currentCursor = cursor
+                while let cursorUnwrapped = currentCursor {
+                    let (moreResults, newCursor) = try await publicDatabase.records(continuingMatchFrom: cursorUnwrapped)
+                    try await deleteWishlistBatch(results: moreResults, totalDeleted: &totalDeleted, context: context)
+                    currentCursor = newCursor
+                }
+            } catch {
+                print("⚠️ [WIPE] Error fetching wishlist items for \(context): \(error)")
+            }
+
+            print("🧨 [WIPE] Deleted \(totalDeleted) wishlist items for \(context)")
+        }
+
+        func deleteWishlistBatch(
+            results: [(CKRecord.ID, Result<CKRecord, Error>)],
+            totalDeleted: inout Int,
+            context: String
+        ) async throws {
+            for (_, result) in results {
+                guard let record = try? result.get() else { continue }
+                let recordID = record.recordID
+                do {
+                    try await publicDatabase.deleteRecord(withID: recordID)
+                    deletedItemIDs.append(recordID.recordName)
+                    totalDeleted += 1
+                    let name = record["name"] as? String ?? "<no-name>"
+                    print("🗑️ [WIPE] Deleted wishlist item '\(name)' (\(recordID.recordName)) for \(context)")
+                } catch {
+                    print("⚠️ [WIPE] Failed to delete wishlist item \(recordID.recordName) for \(context): \(error)")
+                }
+            }
+        }
+
+        // 1) Delete wishlist items owned directly by the current user
+        let myItemsPredicate = NSPredicate(format: "ownerID == %@", ownerName)
+        await deleteWishlistItems(matching: myItemsPredicate, context: "user \(ownerName)")
+
+        // 2) Delete children and their wishlist items
+        do {
+            let childPredicate = NSPredicate(format: "parentUserRecordID == %@", ownerName)
+            let childQuery = CKQuery(recordType: RecordType.child.rawValue, predicate: childPredicate)
+
+            var totalChildrenDeleted = 0
+            var (results, cursor) = try await publicDatabase.records(matching: childQuery)
+
+            func handleChildBatch(results: [(CKRecord.ID, Result<CKRecord, Error>)]) async {
+                for (_, result) in results {
+                    guard let childRecord = try? result.get() else { continue }
+                    let childID = childRecord.recordID
+                    let childName = childRecord["name"] as? String ?? "<no-name>"
+
+                    // Delete this child's wishlist items
+                    let childItemsPredicate = NSPredicate(format: "ownerID == %@", childID.recordName)
+                    await deleteWishlistItems(matching: childItemsPredicate, context: "child \(childName)")
+
+                    // Delete the child record itself
+                    do {
+                        try await publicDatabase.deleteRecord(withID: childID)
+                        totalChildrenDeleted += 1
+                        print("🗑️ [WIPE] Deleted child '\(childName)' (\(childID.recordName))")
+                    } catch {
+                        print("⚠️ [WIPE] Failed to delete child \(childID.recordName): \(error)")
+                    }
+                }
+            }
+
+            await handleChildBatch(results: results)
+            var currentCursor = cursor
+            while let cursorUnwrapped = currentCursor {
+                let (moreResults, newCursor) = try await publicDatabase.records(continuingMatchFrom: cursorUnwrapped)
+                await handleChildBatch(results: moreResults)
+                currentCursor = newCursor
+            }
+
+            print("🧨 [WIPE] Deleted \(totalChildrenDeleted) children for user \(ownerName)")
+        } catch {
+            print("⚠️ [WIPE] Error while deleting children for user \(ownerName): \(error)")
+        }
+
+        // 3) Delete purchases created by the current user
+        do {
+            let purchasePredicate = NSPredicate(format: "purchaserUserRecordID == %@", ownerName)
+            let purchaseQuery = CKQuery(recordType: RecordType.purchase.rawValue, predicate: purchasePredicate)
+
+            var totalPurchasesDeleted = 0
+            var (results, cursor) = try await publicDatabase.records(matching: purchaseQuery)
+
+            func handlePurchaseBatch(results: [(CKRecord.ID, Result<CKRecord, Error>)]) async {
+                for (_, result) in results {
+                    guard let purchaseRecord = try? result.get() else { continue }
+                    let recordID = purchaseRecord.recordID
+                    do {
+                        try await publicDatabase.deleteRecord(withID: recordID)
+                        totalPurchasesDeleted += 1
+                        print("🗑️ [WIPE] Deleted purchase \(recordID.recordName) created by user \(ownerName)")
+                    } catch {
+                        print("⚠️ [WIPE] Failed to delete purchase \(recordID.recordName): \(error)")
+                    }
+                }
+            }
+
+            await handlePurchaseBatch(results: results)
+            var currentCursor = cursor
+            while let cursorUnwrapped = currentCursor {
+                let (moreResults, newCursor) = try await publicDatabase.records(continuingMatchFrom: cursorUnwrapped)
+                await handlePurchaseBatch(results: moreResults)
+                currentCursor = newCursor
+            }
+
+            print("🧨 [WIPE] Deleted \(totalPurchasesDeleted) purchases created by user \(ownerName)")
+        } catch let error as CKError where error.code == .unknownItem {
+            // Purchase record type might not exist yet – that's fine
+            print("ℹ️ [WIPE] Purchase record type does not exist; nothing to delete for user \(ownerName)")
+        } catch {
+            print("⚠️ [WIPE] Error while deleting purchases created by user \(ownerName): \(error)")
+        }
+
+        // 4) Delete purchases that reference now-deleted items (regardless of purchaser)
+        if !deletedItemIDs.isEmpty {
+            print("🧨 [WIPE] Cleaning up purchases for \(deletedItemIDs.count) deleted items")
+
+            for itemID in deletedItemIDs {
+                let itemPredicate = NSPredicate(format: "itemRecordID == %@", itemID)
+                let itemPurchaseQuery = CKQuery(recordType: RecordType.purchase.rawValue, predicate: itemPredicate)
+
+                do {
+                    var (results, cursor) = try await publicDatabase.records(matching: itemPurchaseQuery)
+
+                    func handleItemPurchaseBatch(results: [(CKRecord.ID, Result<CKRecord, Error>)]) async {
+                        for (_, result) in results {
+                            guard let purchaseRecord = try? result.get() else { continue }
+                            let recordID = purchaseRecord.recordID
+                            do {
+                                try await publicDatabase.deleteRecord(withID: recordID)
+                                print("🗑️ [WIPE] Deleted purchase \(recordID.recordName) for deleted item \(itemID)")
+                            } catch {
+                                print("⚠️ [WIPE] Failed to delete purchase \(recordID.recordName) for item \(itemID): \(error)")
+                            }
+                        }
+                    }
+
+                    await handleItemPurchaseBatch(results: results)
+                    var currentCursor = cursor
+                    while let cursorUnwrapped = currentCursor {
+                        let (moreResults, newCursor) = try await publicDatabase.records(continuingMatchFrom: cursorUnwrapped)
+                        await handleItemPurchaseBatch(results: moreResults)
+                        currentCursor = newCursor
+                    }
+                } catch let error as CKError where error.code == .unknownItem {
+                    // No purchases for this item – fine
+                    continue
+                } catch {
+                    print("⚠️ [WIPE] Error while cleaning purchases for item \(itemID): \(error)")
+                }
+            }
+        }
+
+        // 5) Delete friends owned by the current user (PRIVATE database)
+        do {
+            let friendPredicate = NSPredicate(format: "ownerID == %@", ownerName)
+            let friendQuery = CKQuery(recordType: RecordType.friend.rawValue, predicate: friendPredicate)
+
+            var totalFriendsDeleted = 0
+            var (results, cursor) = try await privateDatabase.records(matching: friendQuery)
+
+            func handleFriendBatch(results: [(CKRecord.ID, Result<CKRecord, Error>)]) async {
+                for (_, result) in results {
+                    guard let friendRecord = try? result.get() else { continue }
+                    let recordID = friendRecord.recordID
+                    let friendName = friendRecord["name"] as? String ?? "<no-name>"
+                    do {
+                        try await privateDatabase.deleteRecord(withID: recordID)
+                        totalFriendsDeleted += 1
+                        print("🗑️ [WIPE] Deleted friend '\(friendName)' (\(recordID.recordName)) for user \(ownerName)")
+                    } catch {
+                        print("⚠️ [WIPE] Failed to delete friend \(recordID.recordName): \(error)")
+                    }
+                }
+            }
+
+            await handleFriendBatch(results: results)
+            var currentCursor = cursor
+            while let cursorUnwrapped = currentCursor {
+                let (moreResults, newCursor) = try await privateDatabase.records(continuingMatchFrom: cursorUnwrapped)
+                await handleFriendBatch(results: moreResults)
+                currentCursor = newCursor
+            }
+
+            print("🧨 [WIPE] Deleted \(totalFriendsDeleted) friends for user \(ownerName)")
+        } catch {
+            print("⚠️ [WIPE] Error while deleting friends for user \(ownerName): \(error)")
+        }
+
+        print("✅ [WIPE] Completed CloudKit wipe for current user: \(ownerName)")
     }
 }

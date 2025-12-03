@@ -6,192 +6,319 @@
 //
 
 import SwiftUI
+import SwiftData
 import Contacts
 import ContactsUI
 import CloudKit
 
 struct FriendsListView: View {
-    @StateObject private var cloudKit = CloudKitManager.shared
-    @State private var friends: [CKFriend] = []
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Friend.name) private var friends: [Friend]
+    @ObservedObject private var cloudKit = CloudKitManager.shared
+
+    @State private var cloudKitFriendRecords: [String: CKRecord] = [:]  // friendRecordID -> CKRecord
     @State private var friendItemCounts: [String: Int] = [:]  // friendRecordID -> item count
+    @State private var friendChildren: [String: [CKChild]] = [:]  // friendRecordID -> children
+    @State private var childItemCounts: [String: Int] = [:]  // childRecordID -> item count
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showingError = false
     @State private var hasLoadedOnce = false
-    @State private var hasInitializedFromCache = false
-
+    
     @State private var showingContactPicker = false
     @State private var contactPermissionStatus: CNAuthorizationStatus = .notDetermined
-    @State private var friendToInvite: CKFriend?
+    @State private var friendToInvite: Friend?
     @State private var refreshTask: Task<Void, Never>?
+    @State private var shareProfileURL: URL?
+    @State private var showingNamePrompt = false
+    @State private var tempName = ""
+    @AppStorage("userName") private var userName = ""
 
     var isActive: Bool = true
 
     var body: some View {
+        navigationView
+    }
+    
+    private var navigationView: some View {
         NavigationStack {
-            ZStack {
-                Color.creamBackground
-                    .ignoresSafeArea()
-
-                VStack(spacing: 0) {
-                    if friends.isEmpty {
-                        if isLoading || cloudKit.isPreloadingFriends {
-                            loadingStateView
-                        } else {
-                            emptyStateView
-                        }
-                    } else {
-                        ScrollView {
-                            LazyVStack(spacing: Spacing.md) {
-                                ForEach(friends) { friend in
-                                    VStack(spacing: Spacing.sm) {
-                                        // Parent friend row
-                                        NavigationLink {
-                                            FriendWishlistView(friend: friend)
-                                        } label: {
-                                            FriendRow(
-                                                friend: friend,
-                                                itemCount: friendItemCounts[friend.friendUserRecordID ?? ""],
-                                                onInvite: {
-                                                    inviteFriend(friend)
-                                                }
-                                            )
-                                        }
-                                        .buttonStyle(PlainButtonStyle())
-
-                                        // Children (always shown, indented)
-                                        ForEach(friend.visibleChildren) { child in
-                                            NavigationLink {
-                                                FriendWishlistView(friend: friend, child: child)
-                                            } label: {
-                                                ChildRow(
-                                                    child: child,
-                                                    itemCount: friendItemCounts[child.id]
-                                                )
-                                            }
-                                            .buttonStyle(PlainButtonStyle())
-                                            .padding(.leading, 48)
-                                        }
-                                    }
-                                    .transition(.asymmetric(
-                                        insertion: .scale.combined(with: .opacity),
-                                        removal: .scale.combined(with: .opacity)
-                                    ))
-                                }
-                            }
-                            .padding(Spacing.md)
-                        }
-                        .refreshable {
-                            await loadFriends()
-                        }
+            mainContent
+                .navigationTitle("")
+                .goldTitle("Friends")
+                .sheet(isPresented: $showingContactPicker) {
+                    ContactPickerView { contacts in
+                        addFriends(from: contacts)
                     }
                 }
+                .onAppear(perform: handleAppear)
+                .onDisappear(perform: stopPeriodicRefresh)
+                .onChange(of: isActive) { oldValue, newValue in
+                    handleActiveChange(oldValue, newValue)
+                }
+                .onChange(of: cloudKit.isSignedInToiCloud) { oldValue, newValue in
+                    handleSignInChange(oldValue, newValue)
+                }
+                .sheet(item: $friendToInvite) { friend in
+                    ShareSheet(activityItems: [createInviteMessage(for: friend)])
+                }
+                .sheet(item: Binding(
+                    get: { shareProfileURL.map { IdentifiableURL(url: $0) } },
+                    set: { shareProfileURL = $0?.url }
+                )) { identifiableURL in
+                    ShareSheet(activityItems: ["Here is my wishlist:", identifiableURL.url])
+                }
+                .alert("What's your name?", isPresented: $showingNamePrompt) {
+                    TextField("Your Name", text: $tempName)
+                    Button("Cancel", role: .cancel) { }
+                    Button("Share") {
+                        if !tempName.isEmpty {
+                            userName = tempName
+                            generateAndShareLink()
+                        }
+                    }
+                } message: {
+                    Text("Enter your name so friends know who sent the invite.")
+                }
+                .alert("Error", isPresented: $showingError) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    if let errorMessage = errorMessage {
+                        Text(errorMessage)
+                    }
+                }
+        }
+    }
+    
+    private var mainContent: some View {
+        let _ = print("🔍 [UI] FriendsListView rendering with \(friends.count) friends")
+        
+        return ZStack {
+            Color.creamBackground
+                .ignoresSafeArea()
 
-                // Floating Action Button
-                VStack {
+            VStack(spacing: 0) {
+                if friends.isEmpty {
+                    if isLoading {
+                        loadingStateView
+                    } else {
+                        emptyStateView
+                    }
+                } else {
+                    friendsList
+                }
+            }
+
+            // Floating Action Button
+            VStack {
+                Spacer()
+
+                HStack {
                     Spacer()
 
-                    HStack {
-                        Spacer()
+                    FloatingActionButton(
+                        action: {
+                            HapticManager.buttonTapped()
+                            requestContactsAccess()
+                        },
+                        icon: "plus"
+                    )
+                    .sparkle(isActive: true)
+                    .padding(Spacing.lg)
+                }
+            }
+        }
+    }
+    
+    private var friendsList: some View {
+        ScrollView {
+            LazyVStack(spacing: Spacing.md) {
+                ForEach(friends) { friend in
+                    friendRow(for: friend)
+                }
+            }
+            .padding(Spacing.md)
+        }
+        .refreshable {
+            await loadFriendData()
+        }
+    }
+    
+    private func friendRow(for friend: Friend) -> some View {
+        VStack(spacing: Spacing.sm) {
+            // Parent friend row
+            NavigationLink {
+                FriendWishlistView(friend: friend)
+            } label: {
+                FriendRow(
+                    friend: friend,
+                    itemCount: friendItemCounts[friend.friendUserRecordID ?? ""]
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .contextMenu {
+                Button(role: .destructive) {
+                    deleteFriend(friend)
+                } label: {
+                    Label("Remove Friend", systemImage: "trash")
+                }
+            }
 
-                        FloatingActionButton(
-                            action: {
-                                HapticManager.buttonTapped()
-                                requestContactsAccess()
-                            },
-                            icon: "plus"
+            // Children rows (fetched from CloudKit)
+            if let friendRecordID = friend.friendUserRecordID,
+               let children = friendChildren[friendRecordID] {
+                let visibleChildren = children.filter { !friend.hiddenChildRecordIDs.contains($0.id) }
+                
+                ForEach(visibleChildren) { child in
+                    NavigationLink {
+                        FriendWishlistView(friend: friend, child: child)
+                    } label: {
+                        ChildRow(
+                            child: child,
+                            itemCount: childItemCounts[child.id]
                         )
-                        .sparkle(isActive: true)
-                        .padding(Spacing.lg)
                     }
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(.leading, Spacing.lg)
                 }
             }
-            .navigationTitle("")
-            .goldTitle("Friends")
-            .sheet(isPresented: $showingContactPicker) {
-                ContactPickerView { contact in
-                    addFriend(from: contact)
-                }
+        }
+        .transition(.asymmetric(
+            insertion: .scale.combined(with: .opacity),
+            removal: .scale.combined(with: .opacity)
+        ))
+    }
+    
+    private func handleAppear() {
+        checkContactPermission()
+
+        // Load friends from CloudKit on appear
+        if !hasLoadedOnce && cloudKit.isSignedInToiCloud {
+            Task {
+                await loadFriendsFromCloudKit()
+                await loadFriendData()
+                hasLoadedOnce = true
             }
-            .onAppear {
-                checkContactPermission()
+        }
 
-                // Initialize from cache on first appearance
-                if !hasInitializedFromCache && !cloudKit.cachedFriends.isEmpty {
-                    print("📋 [FRIENDS] Initializing from cache (\(cloudKit.cachedFriends.count) friends)")
-                    friends = cloudKit.cachedFriends
-                    friendItemCounts = cloudKit.cachedFriendItemCounts
-                    hasInitializedFromCache = true
-                    hasLoadedOnce = true
+        // Start periodic refresh if tab is active
+        if isActive {
+            startPeriodicRefresh()
+        }
+    }
+
+    /// Load friends from CloudKit and sync with local SwiftData cache
+    private func loadFriendsFromCloudKit() async {
+        print("🔄 [FRIENDS] Loading friends from CloudKit...")
+
+        guard cloudKit.isSignedInToiCloud else {
+            print("⚠️ [FRIENDS] Not signed in to iCloud, skipping")
+            return
+        }
+
+        do {
+            let cloudKitFriends = try await cloudKit.fetchMyFriends()
+            print("📦 [FRIENDS] Found \(cloudKitFriends.count) friends in CloudKit")
+
+            await MainActor.run {
+                // Store CloudKit records for reference
+                for record in cloudKitFriends {
+                    cloudKitFriendRecords[record.recordID.recordName] = record
                 }
 
-                // Load friends on appear if CloudKit is ready and we haven't loaded yet
-                if !hasLoadedOnce && cloudKit.isSignedInToiCloud {
-                    Task {
-                        await loadFriends()
-                        hasLoadedOnce = true
+                // Sync with local cache
+                for record in cloudKitFriends {
+                    let name = record["name"] as? String ?? ""
+                    let phoneNumber = (record["phoneNumber"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                    let email = (record["email"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                    let friendUserRecordID = (record["friendUserRecordID"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                    let addedAt = record["addedAt"] as? Date ?? Date()
+                    let cloudKitRecordID = record.recordID.recordName
+
+                    // Get photo if available
+                    var imageData: Data?
+                    if let asset = record["photo"] as? CKAsset,
+                       let fileURL = asset.fileURL,
+                       let data = try? Data(contentsOf: fileURL) {
+                        imageData = data
                     }
-                }
-                // Start periodic refresh if tab is active
-                if isActive {
-                    startPeriodicRefresh()
-                }
-            }
-            .onDisappear {
-                stopPeriodicRefresh()
-            }
-            .onChange(of: isActive) { _, active in
-                if active {
-                    if !hasLoadedOnce && cloudKit.isSignedInToiCloud {
-                        Task {
-                            await loadFriends()
-                            hasLoadedOnce = true
+
+                    // Check if friend already exists in local cache
+                    if let existingFriend = friends.first(where: { friend in
+                        // Match by CloudKit record ID first (most reliable)
+                        if let existingCKID = friend.cloudKitRecordID, existingCKID == cloudKitRecordID {
+                            return true
                         }
+                        // Fallback to name or contact info
+                        if friend.name == name { return true }
+                        if let phone = phoneNumber, let friendPhone = friend.phoneNumber {
+                            let cleanPhone = phone.filter { $0.isNumber }
+                            let cleanFriendPhone = friendPhone.filter { $0.isNumber }
+                            if cleanPhone == cleanFriendPhone { return true }
+                        }
+                        if let email = email, let friendEmail = friend.email {
+                            if email.lowercased() == friendEmail.lowercased() { return true }
+                        }
+                        return false
+                    }) {
+                        // Update existing friend with latest CloudKit data
+                        existingFriend.name = name
+                        existingFriend.phoneNumber = phoneNumber
+                        existingFriend.email = email
+                        existingFriend.hasApp = friendUserRecordID != nil
+                        existingFriend.friendUserRecordID = friendUserRecordID
+                        existingFriend.cloudKitRecordID = cloudKitRecordID
+                        existingFriend.imageData = imageData
+                        print("🔄 [FRIENDS] Updated existing friend: \(name)")
+                    } else {
+                        // Create new friend in local cache
+                        let newFriend = Friend(
+                            name: name,
+                            phoneNumber: phoneNumber,
+                            email: email,
+                            hasApp: friendUserRecordID != nil,
+                            friendUserRecordID: friendUserRecordID,
+                            cloudKitRecordID: cloudKitRecordID,
+                            addedAt: addedAt,
+                            imageData: imageData
+                        )
+                        modelContext.insert(newFriend)
+                        print("✅ [FRIENDS] Added new friend to cache: \(name)")
                     }
-                    // Start periodic refresh when tab becomes active
-                    startPeriodicRefresh()
-                } else {
-                    // Stop periodic refresh when tab becomes inactive
-                    stopPeriodicRefresh()
                 }
+
+                // Save local changes
+                try? modelContext.save()
+                print("✅ [FRIENDS] Synced \(cloudKitFriends.count) friends to local cache")
             }
-            .onChange(of: cloudKit.isSignedInToiCloud) { _, isSignedIn in
-                // Load data immediately when CloudKit is ready, regardless of tab visibility
-                // This ensures friends list is prefetched and ready when user switches tabs
-                if isSignedIn && !hasLoadedOnce {
-                    Task {
-                        await loadFriends()
-                        hasLoadedOnce = true
-                    }
-                }
-            }
-            .onChange(of: cloudKit.shouldRefreshFriends) { _, _ in
-                // Reload friends when refresh is triggered (e.g., after demo data load)
+
+        } catch {
+            print("❌ [FRIENDS] Failed to load friends from CloudKit: \(error)")
+        }
+    }
+    
+    private func handleActiveChange(_ oldValue: Bool, _ active: Bool) {
+        if active {
+            if !hasLoadedOnce && cloudKit.isSignedInToiCloud {
                 Task {
-                    await loadFriends()
-                }
-            }
-            .onChange(of: cloudKit.isPreloadingFriends) { oldValue, newValue in
-                // When preloading completes, update UI with cached data
-                if oldValue && !newValue && !hasInitializedFromCache && !cloudKit.cachedFriends.isEmpty {
-                    print("📋 [FRIENDS] Updating from newly populated cache (\(cloudKit.cachedFriends.count) friends)")
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        friends = cloudKit.cachedFriends
-                        friendItemCounts = cloudKit.cachedFriendItemCounts
-                    }
-                    hasInitializedFromCache = true
+                    await loadFriendsFromCloudKit()
+                    await loadFriendData()
                     hasLoadedOnce = true
                 }
             }
-            .sheet(item: $friendToInvite) { friend in
-                ShareSheet(activityItems: [createInviteMessage(for: friend)])
-            }
-            .alert("Error", isPresented: $showingError) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                if let errorMessage = errorMessage {
-                    Text(errorMessage)
-                }
+            // Start periodic refresh when tab becomes active
+            startPeriodicRefresh()
+        } else {
+            // Stop periodic refresh when tab becomes inactive
+            stopPeriodicRefresh()
+        }
+    }
+
+    private func handleSignInChange(_ oldValue: Bool, _ isSignedIn: Bool) {
+        if isSignedIn && !hasLoadedOnce {
+            Task {
+                await loadFriendsFromCloudKit()
+                await loadFriendData()
+                hasLoadedOnce = true
             }
         }
     }
@@ -220,15 +347,7 @@ struct FriendsListView: View {
     private var loadingStateView: some View {
         VStack(spacing: Spacing.lg) {
             Spacer()
-
-            ProgressView()
-                .scaleEffect(1.5)
-                .tint(.forestGreen)
-
-            Text("Loading friends...")
-                .font(.bodyMedium)
-                .foregroundColor(.warmGray)
-
+            SnowflakeLoadingView("Loading friends...")
             Spacer()
         }
     }
@@ -258,10 +377,8 @@ struct FriendsListView: View {
 
         case .denied, .restricted:
             HapticManager.errorOccurred()
-            // In a real app, show alert directing user to Settings
 
         case .limited:
-            // Limited access - show picker with available contacts
             showingContactPicker = true
 
         @unknown default:
@@ -269,32 +386,37 @@ struct FriendsListView: View {
         }
     }
 
+    private func addFriends(from contacts: [CNContact]) {
+        for contact in contacts {
+            addFriend(from: contact)
+        }
+    }
+
     private func addFriend(from contact: CNContact) {
+        // Get primary phone/email for display/saving
         let phoneNumber = contact.phoneNumbers.first?.value.stringValue
         let email = contact.emailAddresses.first?.value as String?
+
+        // Get ALL phones and emails for discovery
+        let phoneNumbers = contact.phoneNumbers.map { $0.value.stringValue }
+        let emails = contact.emailAddresses.map { $0.value as String }
+
         let name = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
 
-        // Check if this friend already exists
+        // Check if this friend already exists locally
         let isDuplicate = friends.contains { friend in
-            // Match by name (case-insensitive)
-            if friend.name.lowercased() == name.lowercased() {
-                return true
-            }
-            // Match by phone number
+            if friend.name.lowercased() == name.lowercased() { return true }
+
             if let phone = phoneNumber, let friendPhone = friend.phoneNumber,
                !phone.isEmpty, !friendPhone.isEmpty {
                 let cleanPhone = phone.filter { $0.isNumber }
                 let cleanFriendPhone = friendPhone.filter { $0.isNumber }
-                if cleanPhone == cleanFriendPhone {
-                    return true
-                }
+                if cleanPhone == cleanFriendPhone { return true }
             }
-            // Match by email (case-insensitive)
+
             if let email = email, let friendEmail = friend.email,
                !email.isEmpty, !friendEmail.isEmpty {
-                if email.lowercased() == friendEmail.lowercased() {
-                    return true
-                }
+                if email.lowercased() == friendEmail.lowercased() { return true }
             }
             return false
         }
@@ -315,172 +437,181 @@ struct FriendsListView: View {
         }
 
         Task {
+            // Try to discover if friend has the app (tries all phones and emails)
+            var friendUserRecordID: String?
             do {
-                // Try to discover if friend has the app (tries phone first, then email)
-                var friendUserRecordID: String?
-                if let recordID = try await cloudKit.discoverUser(phoneNumber: phoneNumber, email: email) {
+                if let recordID = try await cloudKit.discoverUser(phoneNumbers: phoneNumbers, emails: emails) {
                     friendUserRecordID = recordID.recordName
                     print("✅ Discovered friend has app! Record ID: \(recordID.recordName)")
                 } else {
                     print("ℹ️ Friend hasn't installed the app yet")
                 }
+            } catch {
+                print("⚠️ Error discovering user: \(error)")
+            }
 
-                // Save friend to CloudKit
-                _ = try await cloudKit.saveFriend(
+            // STEP 1: Save to CloudKit FIRST (source of truth)
+            do {
+                let savedRecord = try await cloudKit.saveFriend(
                     name: name,
                     phoneNumber: phoneNumber,
                     email: email,
-                    imageData: imageData,
-                    friendUserRecordID: friendUserRecordID
+                    friendUserRecordID: friendUserRecordID,
+                    imageData: imageData
                 )
+                print("✅ [ADD_FRIEND] Saved friend to CloudKit: \(name)")
 
-                // Delay for CloudKit consistency - increased to ensure propagation on new devices
-                try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
-
-                // Track for review prompt (after first friend)
-                ReviewManager.shared.markFirstFriendAdded()
-
-                // Reload friends
-                await loadFriends()
-            } catch let ckError as CKError {
-                // CloudKit-specific error handling
+                // STEP 2: Then cache locally for fast display
                 await MainActor.run {
-                    errorMessage = ckError.userFriendlyMessage
-                    showingError = true
-                    HapticManager.errorOccurred()
+                    let newFriend = Friend(
+                        name: name,
+                        phoneNumber: phoneNumber,
+                        email: email,
+                        hasApp: friendUserRecordID != nil,
+                        friendUserRecordID: friendUserRecordID,
+                        cloudKitRecordID: savedRecord.recordID.recordName,
+                        imageData: imageData
+                    )
+
+                    print("💾 [ADD_FRIEND] Caching friend locally: \(name), hasApp: \(friendUserRecordID != nil)")
+                    print("📋 [ADD_FRIEND] CloudKit record ID: \(savedRecord.recordID.recordName)")
+
+                    modelContext.insert(newFriend)
+
+                    do {
+                        try modelContext.save()
+                        print("✅ [ADD_FRIEND] Successfully cached friend: \(name)")
+                        print("📊 [ADD_FRIEND] Total friends now: \(friends.count)")
+                    } catch {
+                        print("❌ [ADD_FRIEND] Failed to cache friend: \(error)")
+                    }
+
+                    // Store CloudKit record
+                    cloudKitFriendRecords[savedRecord.recordID.recordName] = savedRecord
+
+                    // Track for review prompt
+                    ReviewManager.shared.markFirstFriendAdded()
+
+                    // Refresh data to get item counts
+                    Task { await loadFriendData() }
                 }
-                print("❌ Failed to add friend \(name): \(ckError)")
             } catch {
-                // Other errors
+                print("❌ [ADD_FRIEND] Failed to save friend to CloudKit: \(error)")
                 await MainActor.run {
-                    errorMessage = "Failed to add friend: \(error.localizedDescription)"
+                    errorMessage = "Failed to save friend: \(error.localizedDescription)"
                     showingError = true
                     HapticManager.errorOccurred()
                 }
-                print("❌ Failed to add friend \(name): \(error)")
             }
         }
     }
+    
+    private func deleteFriend(_ friend: Friend) {
+        // Delete from local cache immediately
+        modelContext.delete(friend)
+        try? modelContext.save()
+        HapticManager.itemDeleted()
 
-    private func loadFriends() async {
-        let startTime = Date()
-        print("⏱️ [FRIENDS] Starting to load friends...")
-        print("📊 [FRIENDS] Current user record ID: \(cloudKit.currentUserRecordID?.recordName ?? "unknown")")
+        // Delete from CloudKit in background
+        if let cloudKitRecordID = friend.cloudKitRecordID {
+            Task {
+                do {
+                    let recordID = CKRecord.ID(recordName: cloudKitRecordID)
+                    try await cloudKit.deleteFriend(recordID)
+                    print("✅ [DELETE_FRIEND] Deleted friend from CloudKit: \(friend.name)")
+                } catch {
+                    print("❌ [DELETE_FRIEND] Failed to delete from CloudKit: \(error)")
+                    // Note: Local delete already happened, so we're in an inconsistent state
+                    // Consider showing error to user and offering to retry
+                }
+            }
+        } else {
+            print("⚠️ [DELETE_FRIEND] No CloudKit record ID for friend: \(friend.name)")
+        }
+    }
 
+    private func loadFriendData() async {
+        guard !friends.isEmpty else { return }
+        
         isLoading = true
         defer { isLoading = false }
-
-        do {
-            let fetchStart = Date()
-            let records = try await cloudKit.fetchMyFriends()
-            print("⏱️ [FRIENDS] Fetched \(records.count) friend records in \(Date().timeIntervalSince(fetchStart).formatted())s")
-
-            // Log details about each friend record for debugging
-            if records.count > 0 {
-                print("📋 [FRIENDS] Friend records breakdown:")
-                for (index, record) in records.enumerated() {
-                    let name = record["name"] as? String ?? "unknown"
-                    let ownerID = record["ownerID"] as? String ?? "unknown"
-                    let friendUserRecordID = record["friendUserRecordID"] as? String ?? "none"
-                    print("  \(index + 1). \(name) (ownerID: \(ownerID.prefix(8))..., hasApp: \(!friendUserRecordID.isEmpty))")
-                }
-            }
-
-            // Fetch children for each friend who has the app
-            var friendsWithChildren: [CKFriend] = []
-            for record in records {
-                let friendRecordID = record["friendUserRecordID"] as? String
-                var children: [CKChild] = []
-
-                if let friendRecordID = friendRecordID, !friendRecordID.isEmpty {
-                    let childFetchStart = Date()
-                    do {
-                        let childRecords = try await cloudKit.fetchChildrenForUser(userRecordID: friendRecordID)
-                        children = childRecords.map { CKChild(from: $0) }
-                        print("⏱️ [FRIENDS] Fetched \(children.count) children for friend in \(Date().timeIntervalSince(childFetchStart).formatted())s")
-                    } catch let error as CKError where error.code == .unknownItem {
-                        // Record type doesn't exist yet - normal on first run
-                        print("☁️ CloudKit: Child record type not created yet")
-                        children = []
-                    } catch {
-                        print("❌ Error fetching children for friend: \(error)")
-                    }
-                }
-
-                friendsWithChildren.append(CKFriend(from: record, children: children))
-            }
-
-            await MainActor.run {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    friends = friendsWithChildren
-                }
-            }
-
-            print("⏱️ [FRIENDS] Displayed \(friends.count) friends in UI")
-
-            // Fetch item counts for friends and children
-            let countStart = Date()
-            await loadItemCounts()
-            print("⏱️ [FRIENDS] Loaded all item counts in \(Date().timeIntervalSince(countStart).formatted())s")
-            print("⏱️ [FRIENDS] TOTAL TIME: \(Date().timeIntervalSince(startTime).formatted())s")
-        } catch let ckError as CKError {
-            let friendlyMessage = ckError.userFriendlyMessage
-            await MainActor.run {
-                errorMessage = friendlyMessage
-                showingError = true
-            }
-            print("❌ [FRIENDS] Failed after \(Date().timeIntervalSince(startTime).formatted())s: \(ckError.localizedDescription)")
-        } catch {
-            await MainActor.run {
-                errorMessage = "Unable to load friends. Please check your internet connection and try again."
-                showingError = true
-            }
-            print("❌ [FRIENDS] Failed after \(Date().timeIntervalSince(startTime).formatted())s: \(error.localizedDescription)")
-        }
-    }
-
-    private func loadItemCounts() async {
-        var totalFetches = 0
+        
+        print("⏱️ [FRIENDS] Loading data for \(friends.count) local friends...")
+        
+        var newCounts: [String: Int] = [:]
+        var newChildren: [String: [CKChild]] = [:]
+        var newChildCounts: [String: Int] = [:]
+        
         for friend in friends where friend.hasApp {
             guard let friendRecordID = friend.friendUserRecordID else { continue }
-
-            // Load item count for friend
-            let fetchStart = Date()
+            
             do {
+                // Fetch friend's wishlist items
                 let items = try await cloudKit.fetchFriendWishlistItems(friendRecordID: friendRecordID)
-                totalFetches += 1
-                print("⏱️ [COUNTS] Fetched \(items.count) items for \(friend.name) in \(Date().timeIntervalSince(fetchStart).formatted())s")
-                await MainActor.run {
-                    friendItemCounts[friendRecordID] = items.count
+                newCounts[friendRecordID] = items.count
+                
+                // Fetch friend's children
+                let childRecords = try await cloudKit.fetchChildrenForUser(userRecordID: friendRecordID)
+                var children = childRecords.map { CKChild(from: $0) }
+                
+                // Deduplicate children by name (keep the one with items, or most recent if both have/not have items)
+                // This handles cases where duplicate Child records exist in CloudKit
+                var uniqueChildren: [String: CKChild] = [:]
+                var childItemCountsTemp: [String: Int] = [:]
+                
+                // First, fetch item counts for all children to help with deduplication
+                for child in children {
+                    do {
+                        let childItems = try await cloudKit.fetchFriendWishlistItems(friendRecordID: child.id)
+                        childItemCountsTemp[child.id] = childItems.count
+                    } catch {
+                        childItemCountsTemp[child.id] = 0
+                    }
+                }
+                
+                // Now deduplicate, preferring children with items
+                for child in children {
+                    let itemCount = childItemCountsTemp[child.id] ?? 0
+                    
+                    if let existing = uniqueChildren[child.name] {
+                        let existingItemCount = childItemCountsTemp[existing.id] ?? 0
+                        
+                        // Prefer the one with items, or if both have/not have items, keep the most recent
+                        if itemCount > existingItemCount {
+                            uniqueChildren[child.name] = child
+                        } else if itemCount == existingItemCount && child.createdAt > existing.createdAt {
+                            uniqueChildren[child.name] = child
+                        }
+                    } else {
+                        uniqueChildren[child.name] = child
+                    }
+                }
+                
+                children = Array(uniqueChildren.values).sorted { $0.name < $1.name }
+                newChildren[friendRecordID] = children
+                
+                // Store item counts for the deduplicated children
+                for child in children {
+                    newChildCounts[child.id] = childItemCountsTemp[child.id] ?? 0
                 }
             } catch {
-                print("❌ Error loading item count for \(friend.name): \(error)")
-            }
-
-            // Load item counts for friend's children
-            for child in friend.children {
-                let childFetchStart = Date()
-                do {
-                    let items = try await cloudKit.fetchFriendWishlistItems(friendRecordID: child.id)
-                    totalFetches += 1
-                    print("⏱️ [COUNTS] Fetched \(items.count) items for child \(child.name) in \(Date().timeIntervalSince(childFetchStart).formatted())s")
-                    await MainActor.run {
-                        friendItemCounts[child.id] = items.count
-                    }
-                } catch {
-                    print("❌ Error loading item count for \(child.name): \(error)")
-                }
+                print("❌ Error loading data for \(friend.name): \(error)")
             }
         }
-        print("⏱️ [COUNTS] Completed \(totalFetches) item count fetches")
+        
+        await MainActor.run {
+            friendItemCounts = newCounts
+            friendChildren = newChildren
+            childItemCounts = newChildCounts
+        }
     }
 
-    private func inviteFriend(_ friend: CKFriend) {
+    private func inviteFriend(_ friend: Friend) {
         HapticManager.buttonTapped()
         friendToInvite = friend
     }
 
-    private func createInviteMessage(for friend: CKFriend) -> String {
+    private func createInviteMessage(for friend: Friend) -> String {
         return """
         I have a wishlist here if you are interested. I would like to see yours as well. Get the list here:
 
@@ -489,22 +620,14 @@ struct FriendsListView: View {
     }
 
     private func startPeriodicRefresh() {
-        // Cancel existing task if any
         stopPeriodicRefresh()
-
-        // Start new periodic refresh task
         refreshTask = Task {
             while !Task.isCancelled {
-                // Wait 30 seconds
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
-
-                // Check if still active and not cancelled
-                guard !Task.isCancelled, isActive, cloudKit.isSignedInToiCloud else {
-                    break
-                }
-
-                // Refresh friends list
-                await loadFriends()
+                guard !Task.isCancelled, isActive, cloudKit.isSignedInToiCloud else { break }
+                // Sync friends from CloudKit, then load their data
+                await loadFriendsFromCloudKit()
+                await loadFriendData()
             }
         }
     }
@@ -513,37 +636,33 @@ struct FriendsListView: View {
         refreshTask?.cancel()
         refreshTask = nil
     }
-}
-
-// MARK: - Contact Picker Wrapper
-struct ContactPickerView: UIViewControllerRepresentable {
-    let onContactSelected: (CNContact) -> Void
-
-    func makeUIViewController(context: Context) -> CNContactPickerViewController {
-        let picker = CNContactPickerViewController()
-        picker.delegate = context.coordinator
-        return picker
+    
+    private func prepareShareProfile() {
+        HapticManager.buttonTapped()
+        
+        if userName.isEmpty {
+            tempName = ""
+            showingNamePrompt = true
+        } else {
+            generateAndShareLink()
+        }
     }
-
-    func updateUIViewController(_ uiViewController: CNContactPickerViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onContactSelected: onContactSelected)
-    }
-
-    class Coordinator: NSObject, CNContactPickerDelegate {
-        let onContactSelected: (CNContact) -> Void
-
-        init(onContactSelected: @escaping (CNContact) -> Void) {
-            self.onContactSelected = onContactSelected
+    
+    private func generateAndShareLink() {
+        // Generate URL - this will be nil if not signed in to iCloud
+        guard let url = DeepLinkManager.shared.generateInviteLink(name: userName) else {
+            errorMessage = "Could not generate invite link. Please make sure you are signed in to iCloud."
+            showingError = true
+            HapticManager.errorOccurred()
+            return
         }
 
-        func contactPicker(_ picker: CNContactPickerViewController, didSelect contact: CNContact) {
-            onContactSelected(contact)
-        }
+        // Setting shareProfileURL will automatically show the sheet via .sheet(item:)
+        shareProfileURL = url
     }
 }
 
 #Preview {
     FriendsListView()
+        .modelContainer(for: Friend.self, inMemory: true)
 }

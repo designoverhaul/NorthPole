@@ -9,7 +9,7 @@ import SwiftUI
 import CloudKit
 
 struct CloudKitWishlistView: View {
-    @StateObject private var cloudKit = CloudKitManager.shared
+    @ObservedObject private var cloudKit = CloudKitManager.shared
     @State private var items: [CKWishlistItem] = []
     @State private var purchases: [String: CKPurchase] = [:]
     @State private var showingAddGift = false
@@ -22,6 +22,10 @@ struct CloudKitWishlistView: View {
     @State private var selectedOwnerID: String?  // nil = current user, non-nil = child recordID
     @State private var refreshTask: Task<Void, Never>?
     @AppStorage("showPurchasedItems") private var showPurchasedItems = true
+    @AppStorage("userName") private var userName = ""
+    @State private var showingNamePrompt = false
+    @State private var showingShareConfirmation = false
+    @State private var tempName = ""
 
     var isActive: Bool = true
 
@@ -34,10 +38,15 @@ struct CloudKitWishlistView: View {
     }
 
     private var displayedItems: [CKWishlistItem] {
-        if showPurchasedItems {
-            return items
+        // Filter items based on selected owner (Me or a Child)
+        if let selectedOwnerID = selectedOwnerID {
+            return items.filter { $0.ownerID == selectedOwnerID }
         } else {
-            return items.filter { purchases[$0.id] == nil }
+            // Show current user's items when "Me" is selected
+            guard let userRecordID = cloudKit.currentUserRecordID else {
+                return []
+            }
+            return items.filter { $0.ownerID == userRecordID.recordName }
         }
     }
 
@@ -60,22 +69,17 @@ struct CloudKitWishlistView: View {
                         .padding(.horizontal, Spacing.md)
                         .padding(.vertical, Spacing.sm)
                         .background(Color.creamBackground)
-                        .onChange(of: selectedOwnerID) { _, _ in
-                            Task {
-                                await loadItems()
-                            }
-                        }
                     }
 
                     // Content area - always takes full space below picker
                     ZStack {
                         if !cloudKit.isSignedInToiCloud {
                             notSignedInView
-                        } else if isLoading {
+                        } else if displayedItems.isEmpty && isLoading {
+                            // Only show full screen loader if we have NO items
                             VStack {
                                 Spacer()
-                                ProgressView("Loading wishlist...")
-                                    .tint(.forestGreen)
+                                SnowflakeLoadingView("Loading wishlist...")
                                 Spacer()
                             }
                         } else if displayedItems.isEmpty {
@@ -108,6 +112,39 @@ struct CloudKitWishlistView: View {
                                 .padding(Spacing.md)
                                 .padding(.bottom, 80)
                             }
+                        }
+                        
+                        // Non-blocking loading indicator at the bottom
+                        if isLoading && !displayedItems.isEmpty {
+                            VStack {
+                                Spacer()
+                                HStack(spacing: 8) {
+                                    Image(systemName: "snowflake")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.forestGreen)
+                                        .rotationEffect(.degrees(isLoading ? 360 : 0))
+                                        .animation(.linear(duration: 2).repeatForever(autoreverses: false), value: isLoading)
+                                    
+                                    Text("Updating...")
+                                        .font(.caption)
+                                        .fontWeight(.medium)
+                                        .foregroundColor(.warmBlack)
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.white)
+                                        .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 4)
+                                        .overlay(
+                                            Capsule()
+                                                .stroke(Color.forestGreen.opacity(0.1), lineWidth: 1)
+                                        )
+                                )
+                                .padding(.bottom, 20)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
+                            .animation(.easeInOut, value: isLoading)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -143,7 +180,20 @@ struct CloudKitWishlistView: View {
                 }
             }
             .navigationTitle("")
-            .goldTitle("My Wishlist")
+            .goldTitleWithMenu(children.isEmpty ? "My Wishlist" : "Our Wishlists") {
+                Button(action: {
+                    HapticManager.buttonTapped()
+                    // Check if we have a name set
+                    if userName.isEmpty {
+                        tempName = ""
+                        showingNamePrompt = true
+                    } else {
+                        showingShareConfirmation = true
+                    }
+                }) {
+                    Label("Your list missing for others?", systemImage: "square.and.arrow.up")
+                }
+            }
             .sheet(isPresented: $showingAddGift) {
                 CloudKitAddGiftView(
                     ownerRecordID: selectedOwnerID,
@@ -207,13 +257,13 @@ struct CloudKitWishlistView: View {
             }
             .onChange(of: isActive) { _, active in
                 if active {
-                    if cloudKit.isSignedInToiCloud {
-                        Task {
-                            await loadChildren()
-                            await loadItems()
-                        }
+                    // Refresh immediately when tab becomes active
+                    Task {
+                        await loadChildren()
+                        await loadItems()
                     }
-                    // Start periodic refresh when tab becomes active
+                    
+                    // Start periodic refresh (background updates every 30s)
                     startPeriodicRefresh()
                 } else {
                     // Stop periodic refresh when tab becomes inactive
@@ -239,6 +289,60 @@ struct CloudKitWishlistView: View {
                     }
                 }
             }
+            .onChange(of: cloudKit.shouldRefreshChildren) { oldValue, newValue in
+                print("🔄 [WISHLIST] shouldRefreshChildren changed from \(oldValue) to \(newValue)")
+                print("🔄 [WISHLIST] Current children count: \(children.count)")
+                print("🔄 [WISHLIST] isActive: \(isActive), isSignedIn: \(cloudKit.isSignedInToiCloud)")
+                
+                Task { @MainActor in
+                    print("🔄 [WISHLIST] Starting children refresh...")
+                    let beforeCount = children.count
+                    
+                    await loadChildren()
+                    
+                    let afterCount = children.count
+                    print("🔄 [WISHLIST] Children refresh complete: \(beforeCount) → \(afterCount)")
+                    
+                    // Log the children we have now
+                    for child in children {
+                        print("   - Child: \(child.name) (ID: \(child.id))")
+                    }
+                    
+                    // If the selected child was deleted, switch back to "Me"
+                    if let selectedId = selectedOwnerID, !children.contains(where: { $0.id == selectedId }) {
+                        print("🔄 [WISHLIST] Selected child was deleted, switching to Me")
+                        selectedOwnerID = nil
+                    }
+                    
+                    // Always reload items when children change to show new child's items or remove deleted child's items
+                    await loadItems()
+                    print("🔄 [WISHLIST] Full refresh complete")
+                }
+            }
+            .alert("Share Wishlist", isPresented: $showingShareConfirmation) {
+                Button("Share as \(userName)") {
+                    shareProfile()
+                }
+                Button("Change Name") {
+                    tempName = userName
+                    showingNamePrompt = true
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Friends will see this name when they view your wishlist.")
+            }
+            .alert("What's your name?", isPresented: $showingNamePrompt) {
+                TextField("Enter your name", text: $tempName)
+                Button("Cancel", role: .cancel) { }
+                Button("Share") {
+                    if !tempName.isEmpty {
+                        userName = tempName
+                        shareProfile()
+                    }
+                }
+            } message: {
+                Text("Your name will be shown when friends view your wishlist")
+            }
         }
     }
 
@@ -250,25 +354,14 @@ struct CloudKitWishlistView: View {
                 .font(.system(size: 72))
                 .foregroundColor(.warmGrayLight)
 
-            if items.isEmpty {
-                Text("No items yet")
-                    .font(.headingMedium)
-                    .foregroundColor(.warmGray)
+            Text("No items yet")
+                .font(.headingMedium)
+                .foregroundColor(.warmGray)
 
-                Text("Tap the + button to add items\nto your wishlist")
-                    .font(.bodyMedium)
-                    .foregroundColor(.warmGray)
-                    .multilineTextAlignment(.center)
-            } else {
-                Text("All items checked off!")
-                    .font(.headingMedium)
-                    .foregroundColor(.warmGray)
-
-                Text("Looks like your friends are on it!\nYou've hidden purchased items in Settings.")
-                    .font(.bodyMedium)
-                    .foregroundColor(.warmGray)
-                    .multilineTextAlignment(.center)
-            }
+            Text("Tap the + button to add items\nto your wishlist")
+                .font(.bodyMedium)
+                .foregroundColor(.warmGray)
+                .multilineTextAlignment(.center)
 
             Spacer()
         }
@@ -305,22 +398,44 @@ struct CloudKitWishlistView: View {
         .padding()
     }
 
+    private func shareProfile() {
+        if let url = DeepLinkManager.shared.generateInviteLink(name: userName) {
+            let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let window = windowScene.windows.first,
+               let rootVC = window.rootViewController {
+                rootVC.present(activityVC, animated: true)
+            }
+        }
+    }
+
     private func loadChildren() async {
         guard cloudKit.isSignedInToiCloud else {
+            print("⚠️ [WISHLIST] Cannot load children - not signed in")
             return
         }
 
         let startTime = Date()
+        print("📥 [WISHLIST] Loading children...")
+        
         do {
             let records = try await cloudKit.fetchMyChildren()
-            children = records.map { CKChild(from: $0) }
-            print("⏱️ [WISHLIST] Loaded \(children.count) children in \(Date().timeIntervalSince(startTime).formatted())s")
+            await MainActor.run {
+                children = records.map { CKChild(from: $0) }
+                print("⏱️ [WISHLIST] Loaded \(children.count) children in \(Date().timeIntervalSince(startTime).formatted())s")
+                for child in children {
+                    print("   - \(child.name) (ID: \(child.id))")
+                }
+            }
         } catch let error as CKError where error.code == .unknownItem {
             // Record type doesn't exist yet - normal on first run
-            print("☁️ CloudKit: Child record type not created yet")
-            children = []
+            print("☁️ [WISHLIST] Child record type not created yet")
+            await MainActor.run {
+                children = []
+            }
         } catch {
-            print("❌ Error loading children: \(error)")
+            print("❌ [WISHLIST] Error loading children: \(error)")
+            print("❌ [WISHLIST] Error type: \(type(of: error))")
         }
     }
 
@@ -332,23 +447,44 @@ struct CloudKitWishlistView: View {
         }
 
         let startTime = Date()
-        print("📥 [WISHLIST] Starting to load items (current count: \(items.count))")
+        print("📥 [WISHLIST] Starting to load ALL items (current count: \(items.count))")
+        print("📥 [WISHLIST] Current children count: \(children.count)")
         isLoading = true
         errorMessage = nil
 
         do {
-            let records: [CKRecord]
-            if let selectedOwnerID = selectedOwnerID {
-                // Fetch items for selected child
-                print("👶 [WISHLIST] Fetching items for child: \(selectedOwnerID)")
-                records = try await cloudKit.fetchFriendWishlistItems(friendRecordID: selectedOwnerID)
-            } else {
-                // Fetch items for current user
-                print("👤 [WISHLIST] Fetching items for current user")
-                records = try await cloudKit.fetchMyWishlistItems()
+            // Fetch items for current user
+            print("👤 [WISHLIST] Fetching items for current user")
+            guard let userRecordID = cloudKit.currentUserRecordID else {
+                print("⚠️ [WISHLIST] No user record ID available")
+                isLoading = false
+                return
             }
-            var loadedItems = records.map { CKWishlistItem(from: $0) }
-            print("📦 [WISHLIST] Fetched \(loadedItems.count) items from CloudKit")
+            print("👤 [WISHLIST] User record ID: \(userRecordID.recordName)")
+            let myRecords = try await cloudKit.fetchMyWishlistItems()
+
+            // Fetch items for all children in parallel
+            var allRecords = myRecords
+            print("👶 [WISHLIST] Fetching items for \(children.count) children")
+            await withTaskGroup(of: [CKRecord].self) { group in
+                for child in children {
+                    group.addTask {
+                        do {
+                            return try await self.cloudKit.fetchFriendWishlistItems(friendRecordID: child.id)
+                        } catch {
+                            print("⚠️ Error loading items for child \(child.name): \(error)")
+                            return []
+                        }
+                    }
+                }
+
+                for await childRecords in group {
+                    allRecords.append(contentsOf: childRecords)
+                }
+            }
+
+            var loadedItems = allRecords.map { CKWishlistItem(from: $0) }
+            print("📦 [WISHLIST] Fetched \(loadedItems.count) total items from CloudKit (user + children)")
 
             // Load purchases for all items
             var purchaseDict: [String: CKPurchase] = [:]
@@ -375,9 +511,12 @@ struct CloudKitWishlistView: View {
             print("⏱️ [WISHLIST] Loaded \(items.count) items in \(Date().timeIntervalSince(startTime).formatted())s")
             print("✅ [WISHLIST] UI updated with \(items.count) items, \(purchases.count) purchases")
         } catch {
-            print("❌ Error loading items: \(error)")
-            errorMessage = error.localizedDescription
-            isLoading = false
+            print("❌ [WISHLIST] Error loading items: \(error)")
+            print("❌ [WISHLIST] Error type: \(type(of: error))")
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                isLoading = false
+            }
         }
     }
 
@@ -444,6 +583,7 @@ struct CloudKitItemDetailView: View {
     let onDelete: () -> Void
     @Environment(\.dismiss) private var dismiss
     @AppStorage("showPurchasedItems") private var showPurchasedItems = true
+    @State private var showingDeleteConfirmation = false
 
     private var isPurchased: Bool {
         purchase != nil
@@ -476,10 +616,9 @@ struct CloudKitItemDetailView: View {
                         }) {
                             Text(item.name)
                                 .font(.custom("Caveat", size: 35))
-                                .foregroundColor(.warmGray)
+                                .foregroundColor(.warmBlack)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal)
-                                .strikethrough(showPurchasedItems && isPurchased, color: .warmGray)
                         }
                         .buttonStyle(PlainButtonStyle())
 
@@ -511,17 +650,36 @@ struct CloudKitItemDetailView: View {
                                     .foregroundColor(.warmGray)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(Spacing.md)
-                                    .background(Color.creamCard)
-                                    .cornerRadius(CornerRadius.md)
                             }
                             .buttonStyle(PlainButtonStyle())
+                        }
+
+                        // Visit Link button
+                        if let url = item.url, !url.isEmpty, let urlObj = URL(string: url) {
+                            Link(destination: urlObj) {
+                                HStack {
+                                    Image(systemName: "link")
+                                    Text("Visit Link")
+                                }
+                                .font(.bodyLarge)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.forestGreen)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, Spacing.md)
+                                .padding(.horizontal, Spacing.lg)
+                                .background(Color.forestGreen.opacity(0.1))
+                                .cornerRadius(CornerRadius.md)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CornerRadius.md)
+                                        .stroke(Color.forestGreen.opacity(0.3), lineWidth: 1.5)
+                                )
+                            }
                         }
 
                         // Delete button
                         Button(action: {
                             HapticManager.buttonTapped()
-                            onDelete()
-                            dismiss()
+                            showingDeleteConfirmation = true
                         }) {
                             HStack {
                                 Image(systemName: "trash")
@@ -541,34 +699,19 @@ struct CloudKitItemDetailView: View {
                     .padding(Spacing.lg)
                     .padding(.bottom, 80)
                 }
-
-                // Visit Link button at bottom (fixed)
-                if let url = item.url, !url.isEmpty, let urlObj = URL(string: url) {
-                    VStack {
-                        Link(destination: urlObj) {
-                            HStack {
-                                Image(systemName: "link")
-                                Text("Visit Link")
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                                    .font(.caption)
-                            }
-                            .font(.bodyMedium)
-                            .fontWeight(.medium)
-                            .foregroundColor(.forestGreen)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, Spacing.md)
-                            .background(Color.forestGreen.opacity(0.1))
-                            .cornerRadius(CornerRadius.md)
-                        }
-                        .padding(Spacing.lg)
-                    }
-                    .background(Color.white)
-                }
             }
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Delete Item", isPresented: $showingDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                onDelete()
+                dismiss()
+            }
+        } message: {
+            Text("Are you sure you want to delete '\(item.name)'?")
+        }
     }
 }
 
@@ -585,11 +728,31 @@ struct CloudKitItemRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
+            // Photo on the left (or spacer to maintain alignment)
+            if item.imageData != nil {
+                WishlistItemPhoto(
+                    imageData: item.imageData,
+                    showCheckmark: showPurchasedItems && isPurchased
+                )
+            } else {
+                // Reserve space to keep text aligned
+                ZStack {
+                    Color.clear
+                        .frame(width: 84, height: 84)
+
+                    // Show checkmark in the reserved space if purchased
+                    if showPurchasedItems && isPurchased {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(.successGreen)
+                    }
+                }
+            }
+
             Text(item.name)
-                .font(.custom("Caveat", size: 32))
+                .font(.custom("Caveat", size: 27))
                 .lineSpacing(-18)
-                .foregroundColor((showPurchasedItems && isPurchased) ? .warmGray : .warmBlack)
-                .strikethrough(showPurchasedItems && isPurchased, color: .warmGray)
+                .foregroundColor(.warmBlack)
                 .lineLimit(2)
 
             Spacer()

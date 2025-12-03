@@ -195,6 +195,86 @@ class XAIService: ObservableObject {
         return results
     }
 
+    // MARK: - Clean Product Title
+    func cleanProductTitle(_ rawTitle: String) async -> String {
+        // Create the request
+        guard let url = URL(string: apiURL) else {
+            print("XAIService: Invalid URL for title cleaning")
+            return rawTitle // Return original if API unavailable
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
+
+        let prompt = """
+        Clean up this product title to make it SHORT and concise. Aggressively remove unnecessary information like:
+        - Brand names (unless they're essential to the product identity)
+        - Pack sizes ("Pack of 2", "Set of 3", "Bundle")
+        - Marketing fluff ("Best", "Premium", "High Quality", "Professional", "Ultimate")
+        - Audience descriptors ("For beginners", "For kids", "For adults", "For women", "For men")
+        - Excessive adjectives and descriptors
+        - Special characters and extra punctuation
+        - Year/model numbers (unless critical)
+        - Material descriptions (unless it's the main feature)
+        - Color/size variations (unless it's the product name itself)
+
+        Focus on the CORE product name only. Keep it under 40 characters. Just return the cleaned title, nothing else.
+
+        Original title: \(rawTitle)
+        """
+
+        let requestBody: [String: Any] = [
+            "model": "grok-4-fast-non-reasoning-latest",
+            "messages": [
+                [
+                    "role": "system",
+                    "content": "You are a helpful assistant that cleans up product titles. Only return the cleaned title, no explanations or extra text."
+                ],
+                [
+                    "role": "user",
+                    "content": prompt
+                ]
+            ],
+            "temperature": 0.3,
+            "max_tokens": 100
+        ]
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            // Check response status
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode != 200 {
+                    print("XAIService: Title cleaning API error: \(httpResponse.statusCode)")
+                    return rawTitle
+                }
+            }
+
+            // Parse the response
+            let jsonResponse = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+
+            guard let choices = jsonResponse?["choices"] as? [[String: Any]],
+                  let firstChoice = choices.first,
+                  let message = firstChoice["message"] as? [String: Any],
+                  let content = message["content"] as? String else {
+                print("XAIService: Failed to parse title cleaning response")
+                return rawTitle
+            }
+
+            let cleanedTitle = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("XAIService: Cleaned title: '\(rawTitle)' -> '\(cleanedTitle)'")
+            return cleanedTitle
+
+        } catch {
+            print("XAIService: Error cleaning title: \(error.localizedDescription)")
+            return rawTitle // Return original on error
+        }
+    }
+
     // MARK: - Open Google Shopping Search
     static func searchGoogleShopping(for giftName: String) {
         // Use a custom character set that properly encodes spaces and special characters

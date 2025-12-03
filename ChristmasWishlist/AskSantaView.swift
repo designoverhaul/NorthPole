@@ -92,6 +92,7 @@ struct AskSantaView: View {
                 .scrollDismissesKeyboard(.interactively)
             }
             .navigationTitle("")
+            .goldTitle("Ask Santa")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // Back button when showing results

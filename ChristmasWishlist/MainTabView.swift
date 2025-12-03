@@ -6,27 +6,35 @@
 //
 
 import SwiftUI
+import SwiftData
+import CloudKit
 
 struct MainTabView: View {
     @State private var selectedTab = 0
+    @ObservedObject private var cloudKit = CloudKitManager.shared
+    @State private var children: [CKChild] = []
+
+    private var wishlistTabLabel: String {
+        children.isEmpty ? "My Wishlist" : "Our Wishlists"
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            AskSantaView(isActive: .constant(selectedTab == 0))
+            MyWishlistView()
                 .tabItem {
-                    Label("Ask Santa", systemImage: "sparkles")
+                    Label(wishlistTabLabel, systemImage: "gift")
                 }
                 .tag(0)
 
-            CloudKitWishlistView(isActive: selectedTab == 1)
+            FriendsListView(isActive: selectedTab == 1)
                 .tabItem {
-                    Label("My Wishlist", systemImage: "gift")
+                    Label("Friends", systemImage: "person.2")
                 }
                 .tag(1)
 
-            FriendsListView(isActive: selectedTab == 2)
+            AskSantaView(isActive: .constant(selectedTab == 2))
                 .tabItem {
-                    Label("Friends", systemImage: "person.2")
+                    Label("Ask Santa", systemImage: "sparkles")
                 }
                 .tag(2)
 
@@ -36,9 +44,34 @@ struct MainTabView: View {
                 }
                 .tag(3)
         }
+        .id("tabview-\(children.count)") // Force TabView to recreate when children count changes
         .tint(.forestGreen)
+        .task {
+            // Load children from CloudKit
+            if cloudKit.isSignedInToiCloud {
+                await loadChildren()
+            }
+        }
+        .onChange(of: cloudKit.shouldRefreshChildren) { _, _ in
+            Task {
+                await loadChildren()
+            }
+        }
         .onChange(of: selectedTab) { _, _ in
             HapticManager.selection()
+        }
+    }
+    
+    private func loadChildren() async {
+        guard cloudKit.isSignedInToiCloud else { return }
+        
+        do {
+            let records = try await cloudKit.fetchMyChildren()
+            await MainActor.run {
+                children = records.map { CKChild(from: $0) }
+            }
+        } catch {
+            // Silently fail - tab label will just show "My Wishlist"
         }
     }
 }

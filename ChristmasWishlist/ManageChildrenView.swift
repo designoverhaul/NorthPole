@@ -10,7 +10,7 @@ import CloudKit
 import SwiftData
 
 struct ManageChildrenView: View {
-    @StateObject private var cloudKit = CloudKitManager.shared
+    @ObservedObject private var cloudKit = CloudKitManager.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
@@ -40,11 +40,15 @@ struct ManageChildrenView: View {
                     .ignoresSafeArea()
 
                 if isLoading {
-                    ProgressView("Loading children...")
-                        .tint(.forestGreen)
+                    SnowflakeLoadingView("Loading children...")
                 } else {
                     List {
-                        Section {
+                        Section(header: Text("Add children to manage their wishlists. When friends add you, they'll see your children too.")
+                            .foregroundColor(.warmGray)
+                            .font(.caption)
+                            .textCase(nil)
+                            .padding(.bottom, 8)
+                        ) {
                             if children.isEmpty {
                                 Text("No children added yet")
                                     .foregroundColor(.warmGray)
@@ -71,10 +75,6 @@ struct ManageChildrenView: View {
                                     .listRowBackground(Color.creamCard)
                                 }
                             }
-                        } footer: {
-                            Text("Add children to manage their wishlists. When friends add you, they'll see your children too.")
-                                .foregroundColor(.warmGray)
-                                .font(.caption)
                         }
                     }
                     .scrollContentBackground(.hidden)
@@ -128,156 +128,96 @@ struct ManageChildrenView: View {
         isLoading = true
         do {
             let records = try await cloudKit.fetchMyChildren()
-            children = records.map { CKChild(from: $0) }
-
-            // Sync to SwiftData for local access
-            await syncChildrenToSwiftData(children)
+            await MainActor.run {
+                children = records.map { CKChild(from: $0) }
+                print("✅ [MANAGE_CHILDREN] Loaded \(children.count) children from CloudKit")
+            }
         } catch let error as CKError where error.code == .unknownItem {
             // Record type doesn't exist yet - this is normal on first run
-            print("☁️ CloudKit: Child record type not created yet")
-            children = []
+            print("☁️ [MANAGE_CHILDREN] Child record type not created yet")
+            await MainActor.run {
+                children = []
+            }
         } catch {
-            print("Error loading children: \(error)")
-            // Don't show error for unknown record type
-            if let ckError = error as? CKError, ckError.code != .unknownItem {
-                self.error = error as? CloudKitError
-                showingError = true
+            print("❌ [MANAGE_CHILDREN] Error loading children: \(error)")
+            await MainActor.run {
+                // Don't show error for unknown record type
+                if let ckError = error as? CKError, ckError.code != .unknownItem {
+                    self.error = error as? CloudKitError
+                    showingError = true
+                }
             }
         }
-        isLoading = false
+        await MainActor.run {
+            isLoading = false
+        }
     }
 
     private func addChild() {
         guard !newChildName.isEmpty else { return }
 
         isAdding = true
-        Task {
+        Task { @MainActor in
             do {
+                print("➕ [MANAGE_CHILDREN] Adding child '\(newChildName)'...")
                 let record = try await cloudKit.saveChild(name: newChildName)
                 let newChild = CKChild(from: record)
+                
                 children.append(newChild)
                 children.sort { $0.name < $1.name }
 
-                // Save to SwiftData
-                await addChildToSwiftData(newChild)
-
                 newChildName = ""
-                showingAddSheet = false
+                // Don't dismiss - keep user on the add sheet so they can add more or manually navigate back
                 HapticManager.itemAdded()
-
-                // Small delay for CloudKit consistency
-                try await Task.sleep(nanoseconds: 500_000_000)
+                
+                print("✅ [MANAGE_CHILDREN] Added child '\(newChild.name)' (ID: \(newChild.id))")
+                
+                // Trigger refresh in other views
+                cloudKit.shouldRefreshChildren.toggle()
+                print("✅ [MANAGE_CHILDREN] Triggered shouldRefreshChildren")
             } catch {
-                print("Error adding child: \(error)")
+                print("❌ [MANAGE_CHILDREN] Error adding child: \(error)")
                 self.error = error as? CloudKitError
                 showingError = true
+                HapticManager.errorOccurred()
             }
             isAdding = false
         }
     }
 
     private func deleteChild(_ child: CKChild) {
-        Task {
+        print("🗑️ [MANAGE_CHILDREN] Delete button tapped for child '\(child.name)'")
+        
+        Task { @MainActor in
             do {
+                print("🗑️ [MANAGE_CHILDREN] Deleting child '\(child.name)' (ID: \(child.id)) from CloudKit...")
+                
+                // Delete from CloudKit (this also deletes all their wishlist items)
                 try await cloudKit.deleteChild(child.record.recordID)
+                print("✅ [MANAGE_CHILDREN] Successfully deleted from CloudKit")
+                
+                // Remove from local state
                 children.removeAll { $0.id == child.id }
+                print("✅ [MANAGE_CHILDREN] Removed from local state, now have \(children.count) children")
 
-                // Remove from SwiftData
-                await deleteChildFromSwiftData(childId: child.id)
-
-                HapticManager.buttonTapped()
+                // Trigger refresh in other views
+                cloudKit.shouldRefreshChildren.toggle()
+                print("✅ [MANAGE_CHILDREN] Triggered refresh")
+                
+                HapticManager.itemDeleted()
             } catch {
-                print("Error deleting child: \(error)")
+                print("❌ [MANAGE_CHILDREN] CloudKit delete failed: \(error)")
+                
+                // Reload children to restore UI if delete failed
+                await loadChildren()
+                
                 self.error = error as? CloudKitError
                 showingError = true
+                HapticManager.errorOccurred()
             }
         }
     }
 
-    // MARK: - SwiftData Sync Helpers
-
-    @MainActor
-    private func syncChildrenToSwiftData(_ ckChildren: [CKChild]) async {
-        // Fetch all existing SwiftData children for this user
-        let descriptor = FetchDescriptor<Child>(
-            predicate: #Predicate { $0.parentId == currentUserId }
-        )
-
-        do {
-            let existingChildren = try modelContext.fetch(descriptor)
-
-            // Create a set of CloudKit child IDs (as strings)
-            let cloudKitChildIds = Set(ckChildren.map { $0.id })
-
-            // Remove SwiftData children that no longer exist in CloudKit
-            for existingChild in existingChildren {
-                if !cloudKitChildIds.contains(existingChild.id.uuidString) {
-                    modelContext.delete(existingChild)
-                }
-            }
-
-            // Add or update children from CloudKit
-            let existingChildIds = Set(existingChildren.map { $0.id.uuidString })
-
-            for ckChild in ckChildren {
-                if !existingChildIds.contains(ckChild.id) {
-                    // New child - add to SwiftData
-                    let newChild = Child(
-                        id: UUID(uuidString: ckChild.id) ?? UUID(),
-                        name: ckChild.name,
-                        parentId: currentUserId,
-                        createdAt: ckChild.createdAt
-                    )
-                    modelContext.insert(newChild)
-                } else {
-                    // Existing child - update name if changed
-                    if let existingChild = existingChildren.first(where: { $0.id.uuidString == ckChild.id }) {
-                        existingChild.name = ckChild.name
-                    }
-                }
-            }
-
-            try modelContext.save()
-        } catch {
-            print("Error syncing children to SwiftData: \(error)")
-        }
-    }
-
-    @MainActor
-    private func addChildToSwiftData(_ ckChild: CKChild) async {
-        let newChild = Child(
-            id: UUID(uuidString: ckChild.id) ?? UUID(),
-            name: ckChild.name,
-            parentId: currentUserId,
-            createdAt: ckChild.createdAt
-        )
-        modelContext.insert(newChild)
-
-        do {
-            try modelContext.save()
-        } catch {
-            print("Error saving child to SwiftData: \(error)")
-        }
-    }
-
-    @MainActor
-    private func deleteChildFromSwiftData(childId: String) async {
-        let descriptor = FetchDescriptor<Child>(
-            predicate: #Predicate { child in
-                child.id.uuidString == childId && child.parentId == currentUserId
-            }
-        )
-
-        do {
-            let childrenToDelete = try modelContext.fetch(descriptor)
-            for child in childrenToDelete {
-                modelContext.delete(child)
-            }
-            try modelContext.save()
-        } catch {
-            print("Error deleting child from SwiftData: \(error)")
-        }
-    }
 }
 
 struct AddChildSheet: View {
@@ -315,7 +255,8 @@ struct AddChildSheet: View {
 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if isAdding {
-                        ProgressView()
+                        Text("❄️")
+                            .font(.system(size: 20))
                     } else {
                         Button("Add") {
                             onAdd()

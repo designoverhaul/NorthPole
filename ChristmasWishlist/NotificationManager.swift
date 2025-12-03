@@ -45,7 +45,8 @@ class NotificationManager {
         print("📲 [LOCAL_NOTIFICATION] Attempting to send notification for item: '\(itemName)'")
 
         // Check if notifications are enabled in settings
-        let notificationsEnabled = UserDefaults.standard.bool(forKey: "notificationsEnabled")
+        // Default to true if never set (matches @AppStorage default in SettingsView)
+        let notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
         print("⚙️ [LOCAL_NOTIFICATION] Settings: notificationsEnabled = \(notificationsEnabled)")
 
         guard notificationsEnabled else {

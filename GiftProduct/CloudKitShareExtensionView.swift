@@ -33,13 +33,15 @@ struct CloudKitShareExtensionView: View {
                     .ignoresSafeArea()
 
                 if isLoading {
-                    VStack {
-                        ProgressView("Loading...")
-                            .tint(.forestGreen)
+                    VStack(spacing: 16) {
+                        Text("❄️")
+                            .font(.system(size: 36))
+                        Text("Loading...")
+                            .font(.body)
+                            .foregroundColor(.warmGray)
                         Text("Extracting product info...")
                             .font(.caption)
                             .foregroundColor(.warmGray)
-                            .padding(.top)
                     }
                 } else if !cloudKit.isSignedInToiCloud {
                     notSignedInView
@@ -132,8 +134,8 @@ struct CloudKitShareExtensionView: View {
                             Button(action: addItem) {
                                 HStack {
                                     if isSaving {
-                                        ProgressView()
-                                            .tint(.white)
+                                        Text("❄️")
+                                            .font(.system(size: 20))
                                     }
                                     Spacer()
                                     Text(isSaving ? "Saving..." : "Add to Wishlist")

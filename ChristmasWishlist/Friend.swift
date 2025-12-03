@@ -10,14 +10,16 @@ import SwiftData
 
 @Model
 final class Friend {
-    var id: UUID
-    var name: String
+    var id: UUID = UUID()
+    var name: String = ""
     var phoneNumber: String?
     var email: String?
-    var hasApp: Bool
-    var userId: UUID?
-    var addedAt: Date
-    var imageData: Data?
+    var hasApp: Bool = false
+    var friendUserRecordID: String? // The friend's CloudKit user record ID (for viewing their wishlist)
+    var cloudKitRecordID: String? // THIS friend record's CloudKit record ID (for syncing)
+    var addedAt: Date = Date()
+    @Attribute(.externalStorage) var imageData: Data?
+    var hiddenChildRecordIDs: [String] = []
 
     init(
         id: UUID = UUID(),
@@ -25,17 +27,21 @@ final class Friend {
         phoneNumber: String? = nil,
         email: String? = nil,
         hasApp: Bool = false,
-        userId: UUID? = nil,
+        friendUserRecordID: String? = nil,
+        cloudKitRecordID: String? = nil,
         addedAt: Date = Date(),
-        imageData: Data? = nil
+        imageData: Data? = nil,
+        hiddenChildRecordIDs: [String] = []
     ) {
         self.id = id
         self.name = name
         self.phoneNumber = phoneNumber
         self.email = email
         self.hasApp = hasApp
-        self.userId = userId
+        self.friendUserRecordID = friendUserRecordID
+        self.cloudKitRecordID = cloudKitRecordID
         self.addedAt = addedAt
         self.imageData = imageData
+        self.hiddenChildRecordIDs = hiddenChildRecordIDs
     }
 }

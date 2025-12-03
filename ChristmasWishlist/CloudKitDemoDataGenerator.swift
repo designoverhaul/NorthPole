@@ -26,20 +26,16 @@ enum CloudKitDemoDataGenerator {
         let sarahFakeUserRecordID = UUID().uuidString
         print("📝 Generated fake user ID for Sarah: \(sarahFakeUserRecordID.prefix(8))...")
 
-        do {
-            // 1. Create Sarah as a friend
-            _ = try await cloudKit.saveFriend(
-                name: "Sarah",
-                phoneNumber: "555-0104",
-                email: "sarah@example.com",
-                imageData: nil,
-                friendUserRecordID: sarahFakeUserRecordID
-            )
-            print("✅ Created friend: Sarah")
-        } catch {
-            print("❌ Failed to create friend Sarah: \(error.localizedDescription)")
-            throw error
-        }
+        // 1. Create Sarah as a friend
+        // NOTE: Friends are now local (SwiftData), so we skip CloudKit creation
+        // _ = try await cloudKit.saveFriend(
+        //     name: "Sarah",
+        //     phoneNumber: "555-0104",
+        //     email: "sarah@example.com",
+        //     imageData: nil,
+        //     friendUserRecordID: sarahFakeUserRecordID
+        // )
+        print("✅ Skipped creating friend Sarah (Friends are now local)")
 
         // Small delay for CloudKit consistency
         try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
@@ -167,11 +163,12 @@ enum CloudKitDemoDataGenerator {
         print("🗑️ Starting to clear all data...")
 
         // 1. Delete all friends
-        let friends = try await cloudKit.fetchMyFriends()
-        for friend in friends {
-            try await cloudKit.deleteFriend(friend.recordID)
-        }
-        print("✅ Deleted \(friends.count) friends")
+        // NOTE: Friends are now local (SwiftData), so we skip CloudKit deletion
+        // let friends = try await cloudKit.fetchMyFriends()
+        // for friend in friends {
+        //     try await cloudKit.deleteFriend(friend.recordID)
+        // }
+        print("✅ Skipped deleting friends (Friends are now local)")
 
         // 2. Delete all children
         let children = try await cloudKit.fetchMyChildren()

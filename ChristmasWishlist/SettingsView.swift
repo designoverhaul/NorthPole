@@ -6,10 +6,11 @@
 //
 
 import SwiftUI
+import SwiftData
 import CloudKit
 
 struct SettingsView: View {
-    @StateObject private var cloudKit = CloudKitManager.shared
+    @ObservedObject private var cloudKit = CloudKitManager.shared
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("showPurchasedItems") private var showPurchasedItems = true
     @State private var showingPermissionAlert = false
@@ -18,6 +19,8 @@ struct SettingsView: View {
     @State private var showingSuccessAlert = false
     @State private var successAlertMessage = ""
     @State private var showingOnboarding = false
+    @State private var showingDeleteAccountFirstConfirm = false
+    @State private var showingDeleteAccountFinalConfirm = false
 
     var isActive: Bool = true
 
@@ -54,11 +57,20 @@ struct SettingsView: View {
                     }
 
                     Section {
-                        Toggle("Show checked-off items", isOn: $showPurchasedItems)
+                        Toggle("Show purchased status", isOn: $showPurchasedItems)
                             .tint(.forestGreen)
                             .foregroundColor(.warmBlack)
                             .listRowBackground(Color.creamCard)
+                    } header: {
+                        Text("Secrecy")
+                            .foregroundColor(.forestGreen)
+                    } footer: {
+                        Text("If on you'll know when your wish list items are purchased")
+                            .foregroundColor(.warmGray)
+                            .font(.caption)
+                    }
 
+                    Section {
                         Toggle("Purchase notifications", isOn: $notificationsEnabled)
                             .tint(.forestGreen)
                             .foregroundColor(.warmBlack)
@@ -67,11 +79,8 @@ struct SettingsView: View {
                                 // Always check/request permissions when toggled
                                 requestNotificationPermissions(userToggledOn: newValue)
                             }
-                    } header: {
-                        Text("Secrecy")
-                            .foregroundColor(.forestGreen)
                     } footer: {
-                        Text("Get notified when a friend checks items off your list. Choose whether to see which items have been marked as purchased. Turn off to keep it a complete surprise!")
+                        Text("Get notified when someone purchases from your wishlist")
                             .foregroundColor(.warmGray)
                             .font(.caption)
                     }
@@ -79,7 +88,7 @@ struct SettingsView: View {
                     Section {
                         Button(action: {
                             HapticManager.buttonTapped()
-                            ReviewManager.shared.requestReviewManually()
+                            rateApp()
                         }) {
                             HStack {
                                 Image(systemName: "star.fill")
@@ -117,61 +126,29 @@ struct SettingsView: View {
                             .foregroundColor(.forestGreen)
                     }
 
+                    // MARK: - Account
                     Section {
-                        Button(action: { showingOnboarding = true }) {
+                        Button {
+                            HapticManager.buttonTapped()
+                            showingDeleteAccountFirstConfirm = true
+                        } label: {
                             HStack {
-                                Image(systemName: "play.circle.fill")
-                                    .foregroundColor(.gold)
-                                Text("View Onboarding Tutorial")
-                                    .foregroundColor(.warmBlack)
-                                Spacer()
-                            }
-                        }
-                        .listRowBackground(Color.creamCard)
-
-                        Button(action: checkSubscriptions) {
-                            HStack {
-                                Image(systemName: "bell.badge.fill")
+                                Image(systemName: "person.fill.xmark")
                                     .foregroundColor(.forestGreen)
-                                Text("Check Notification Subscriptions")
+                                Text("Delete My Account")
                                     .foregroundColor(.warmBlack)
                                 Spacer()
                             }
                         }
-                        .listRowBackground(Color.creamCard)
-
-                        Button(action: resubscribeToNotifications) {
-                            HStack {
-                                Image(systemName: "arrow.clockwise.circle.fill")
-                                    .foregroundColor(.gold)
-                                Text("Reset Notification Subscriptions")
-                                    .foregroundColor(.warmBlack)
-                                Spacer()
-                            }
-                        }
-                        .listRowBackground(Color.creamCard)
-
-                        Button(action: testLocalNotification) {
-                            HStack {
-                                Image(systemName: "bell.fill")
-                                    .foregroundColor(.gold)
-                                Text("Test Local Notification")
-                                    .foregroundColor(.warmBlack)
-                                Spacer()
-                            }
-                        }
+                        .disabled(!cloudKit.isSignedInToiCloud)
                         .listRowBackground(Color.creamCard)
                     } header: {
-                        Text("Developer")
+                        Text("Account")
                             .foregroundColor(.forestGreen)
-                    } footer: {
-                        Text("View the onboarding tutorial again for testing purposes. Check or reset CloudKit notification subscriptions if you're not receiving purchase notifications.")
-                            .foregroundColor(.warmGray)
-                            .font(.caption)
                     }
 
                     Section {
-                        Link(destination: URL(string: "https://designoverhaul.com/wishlist-privacy-policy/")!) {
+                        Link(destination: URL(string: "https://designoverhaul.com/privacy-policy-north-pole/")!) {
                             HStack {
                                 Image(systemName: "hand.raised.fill")
                                     .foregroundColor(.forestGreen)
@@ -194,7 +171,7 @@ struct SettingsView: View {
                         HStack {
                             Spacer()
                             VStack(spacing: 4) {
-                                Text("Christmas Wishlist v\(appVersion)")
+                                Text("North Pole v\(appVersion)")
                                     .font(.caption)
                                     .foregroundColor(.warmGray)
                                 Text("Made with ❄️ for the holidays")
@@ -231,6 +208,25 @@ struct SettingsView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(successAlertMessage)
+            }
+            .alert("Delete My Account?", isPresented: $showingDeleteAccountFirstConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Continue", role: .destructive) {
+                    showingDeleteAccountFirstConfirm = false
+                    showingDeleteAccountFinalConfirm = true
+                }
+            } message: {
+                Text("This will delete all of your wishlists, children, purchases, and friends from iCloud for this app on your iCloud account. This cannot be undone.")
+            }
+            .alert("Delete My Account Data", isPresented: $showingDeleteAccountFinalConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Delete My Account", role: .destructive) {
+                    Task {
+                        await deleteAccountData()
+                    }
+                }
+            } message: {
+                Text("Are you sure? This action will permanently remove your data for this app from iCloud on this account. Other users’ data will not be affected.")
             }
             .fullScreenCover(isPresented: $showingOnboarding) {
                 OnboardingView(isCompleted: $showingOnboarding)
@@ -285,7 +281,7 @@ struct SettingsView: View {
 
     private func sendBugReport() {
         let email = "contact@designoverhaul.com"
-        let subject = "Christmas Wishlist - Bug Report"
+        let subject = "North Pole - Bug Report"
         let body = """
         Please describe the bug you encountered:
 
@@ -304,7 +300,7 @@ struct SettingsView: View {
 
     private func requestFeature() {
         let email = "contact@designoverhaul.com"
-        let subject = "Christmas Wishlist - Feature Request"
+        let subject = "North Pole - Feature Request"
         let body = """
         Hi,
 
@@ -377,6 +373,208 @@ struct SettingsView: View {
         }
     }
 
+    private func cleanLocalDatabase() {
+        Task { @MainActor in
+            print("🧹 [CLEAN] User requested database clean")
+
+            do {
+                let context = ChristmasWishlistApp.sharedModelContainer.mainContext
+
+                // Delete all wishlist items
+                let itemsDescriptor = FetchDescriptor<WishlistItem>()
+                let items = try context.fetch(itemsDescriptor)
+                for item in items {
+                    context.delete(item)
+                }
+                print("🧹 [CLEAN] Deleted \(items.count) wishlist items")
+
+                // Delete all children
+                let childrenDescriptor = FetchDescriptor<Child>()
+                let children = try context.fetch(childrenDescriptor)
+                for child in children {
+                    context.delete(child)
+                }
+                print("🧹 [CLEAN] Deleted \(children.count) children")
+
+                // Delete all friends
+                let friendsDescriptor = FetchDescriptor<Friend>()
+                let friends = try context.fetch(friendsDescriptor)
+                for friend in friends {
+                    context.delete(friend)
+                }
+                print("🧹 [CLEAN] Deleted \(friends.count) friends")
+
+                try context.save()
+                print("✅ [CLEAN] Database cleaned successfully")
+
+                // Reset migration flag so it runs again
+                UserDefaults.standard.set(false, forKey: "hasRunCloudKitMigration_v1")
+                print("✅ [CLEAN] Reset migration flag")
+
+                successAlertMessage = "Local database cleaned! Deleted \(items.count) items, \(children.count) children, and \(friends.count) friends.\n\nRestart the app to re-download from CloudKit."
+                showingSuccessAlert = true
+
+                HapticManager.notification(.success)
+            } catch {
+                print("❌ [CLEAN] Failed to clean database: \(error)")
+                errorAlertMessage = "Failed to clean database: \(error.localizedDescription)"
+                showingErrorAlert = true
+                HapticManager.errorOccurred()
+            }
+        }
+    }
+
+    private func cleanCloudKitDuplicates() {
+        Task {
+            print("🧹 [CLOUDKIT_CLEAN] User requested CloudKit duplicate removal")
+
+            guard cloudKit.isSignedInToiCloud else {
+                await MainActor.run {
+                    errorAlertMessage = "Not signed in to iCloud. Please sign in to clean CloudKit duplicates."
+                    showingErrorAlert = true
+                }
+                return
+            }
+
+            do {
+                // Fetch ALL wishlist items from CloudKit
+                let allRecords = try await cloudKit.fetchMyWishlistItems()
+                print("🧹 [CLOUDKIT_CLEAN] Fetched \(allRecords.count) total items from CloudKit")
+
+                // Group by unique key: name + ownerID
+                var itemGroups: [String: [CKRecord]] = [:]
+
+                for record in allRecords {
+                    let itemName = record["name"] as? String ?? "Unknown"
+                    let ownerRef = record["ownerID"] as? CKRecord.Reference
+                    let ownerID = ownerRef?.recordID.recordName ?? "no_owner"
+
+                    let uniqueKey = "\(itemName)_\(ownerID)"
+
+                    if itemGroups[uniqueKey] == nil {
+                        itemGroups[uniqueKey] = []
+                    }
+                    itemGroups[uniqueKey]?.append(record)
+                }
+
+                // Find duplicates (groups with more than 1 record)
+                var recordsToDelete: [CKRecord.ID] = []
+                var totalDuplicates = 0
+
+                for (key, records) in itemGroups {
+                    if records.count > 1 {
+                        // Sort by creation date (keep the most recent)
+                        let sortedRecords = records.sorted { r1, r2 in
+                            let date1 = r1.creationDate ?? Date.distantPast
+                            let date2 = r2.creationDate ?? Date.distantPast
+                            return date1 > date2 // Most recent first
+                        }
+
+                        // Keep the first (most recent), delete the rest
+                        let duplicates = Array(sortedRecords.dropFirst())
+                        for duplicate in duplicates {
+                            recordsToDelete.append(duplicate.recordID)
+                        }
+
+                        totalDuplicates += duplicates.count
+                        print("🧹 [CLOUDKIT_CLEAN] Found \(records.count) copies of '\(key)' - will delete \(duplicates.count) duplicates")
+                    }
+                }
+
+                print("🧹 [CLOUDKIT_CLEAN] Total duplicates to delete: \(totalDuplicates)")
+
+                if recordsToDelete.isEmpty {
+                    await MainActor.run {
+                        successAlertMessage = "No duplicates found! Your CloudKit database is clean."
+                        showingSuccessAlert = true
+                        HapticManager.notification(.success)
+                    }
+                    return
+                }
+
+                // Delete duplicates from CloudKit in batches (CloudKit limit is 400 per operation)
+                let batchSize = 400
+                var deletedCount = 0
+
+                for batch in recordsToDelete.chunked(into: batchSize) {
+                    let database = CKContainer.default().privateCloudDatabase
+                    let deleteOperation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: batch)
+
+                    deleteOperation.modifyRecordsResultBlock = { result in
+                        switch result {
+                        case .success:
+                            deletedCount += batch.count
+                            print("✅ [CLOUDKIT_CLEAN] Deleted batch of \(batch.count) duplicates")
+                        case .failure(let error):
+                            print("❌ [CLOUDKIT_CLEAN] Failed to delete batch: \(error)")
+                        }
+                    }
+
+                    database.add(deleteOperation)
+
+                    // Wait for operation to complete
+                    try await Task.sleep(nanoseconds: 500_000_000) // 0.5 second delay between batches
+                }
+
+                print("✅ [CLOUDKIT_CLEAN] Deleted \(deletedCount) duplicate items from CloudKit")
+
+                await MainActor.run {
+                    successAlertMessage = "Successfully removed \(deletedCount) duplicate items from CloudKit!\n\nTotal items before: \(allRecords.count)\nDuplicates removed: \(deletedCount)\nUnique items remaining: \(itemGroups.count)"
+                    showingSuccessAlert = true
+                    HapticManager.notification(.success)
+                }
+
+            } catch {
+                print("❌ [CLOUDKIT_CLEAN] Failed to clean CloudKit: \(error)")
+                await MainActor.run {
+                    errorAlertMessage = "Failed to clean CloudKit duplicates: \(error.localizedDescription)"
+                    showingErrorAlert = true
+                    HapticManager.errorOccurred()
+                }
+            }
+        }
+    }
+
+    private func deleteAccountData() async {
+        print("🧨 [SETTINGS] User confirmed delete account")
+
+        guard cloudKit.isSignedInToiCloud else {
+            errorAlertMessage = "Not signed in to iCloud. Please sign in before deleting your account data."
+            showingErrorAlert = true
+            return
+        }
+
+        do {
+            try await cloudKit.wipeCurrentUserData()
+            await MainActor.run {
+                successAlertMessage = "Your account data for this app has been deleted from iCloud for this Apple ID. You can now start fresh by adding children and wishlist items again."
+                showingSuccessAlert = true
+                HapticManager.notification(.success)
+            }
+        } catch let ckError as CKError {
+            await MainActor.run {
+                errorAlertMessage = ckError.userFriendlyMessage
+                showingErrorAlert = true
+                HapticManager.errorOccurred()
+            }
+        } catch {
+            await MainActor.run {
+                errorAlertMessage = "Failed to delete account data: \(error.localizedDescription)"
+                showingErrorAlert = true
+                HapticManager.errorOccurred()
+            }
+        }
+    }
+
+}
+
+// Helper extension for batching arrays
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
+    }
 }
 
 #Preview {

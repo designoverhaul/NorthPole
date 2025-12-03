@@ -9,6 +9,7 @@ import SwiftUI
 import Contacts
 import ContactsUI
 import CloudKit
+import SwiftData
 
 enum OnboardingStep {
     case welcome
@@ -18,8 +19,19 @@ enum OnboardingStep {
 }
 
 struct OnboardingView: View {
-    @StateObject private var cloudKit = CloudKitManager.shared
+    @Environment(\.modelContext) private var modelContext
+    @ObservedObject private var cloudKit = CloudKitManager.shared
     @AppStorage("showPurchasedItems") private var showPurchasedItems = true
+    
+    @State private var currentUserId: UUID = {
+        if let existingId = AppGroupContainer.getCurrentUserId() {
+            return existingId
+        } else {
+            let newId = UUID()
+            AppGroupContainer.saveCurrentUserId(newId)
+            return newId
+        }
+    }()
     @State private var currentStep: OnboardingStep = .welcome
     @State private var showingContactPicker = false
     @State private var selectedContacts: [CNContact] = []
@@ -32,6 +44,24 @@ struct OnboardingView: View {
     @State private var showingError = false
     @State private var failedFriends: [String] = []
     @Binding var isCompleted: Bool
+
+    // Adaptive image width: 30% on iPad, 200 on iPhone
+    private var featuredImageMaxWidth: CGFloat {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            return UIScreen.main.bounds.width * 0.3
+        } else {
+            return 200
+        }
+    }
+
+    // Larger image width for instructions screen
+    private var instructionsImageMaxWidth: CGFloat {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            return UIScreen.main.bounds.width * 0.65
+        } else {
+            return UIScreen.main.bounds.width * 0.9
+        }
+    }
 
     var body: some View {
         let _ = print("🎄 [ONBOARDING] Body evaluated - isCompleted = \(isCompleted)")
@@ -86,7 +116,7 @@ struct OnboardingView: View {
             Image("Santa")
                 .resizable()
                 .scaledToFit()
-                .frame(maxWidth: 200)
+                .frame(maxWidth: featuredImageMaxWidth)
                 .parallax3D()
                 .padding(.horizontal, Spacing.lg)
 
@@ -180,7 +210,7 @@ struct OnboardingView: View {
             Image("cookie")
                 .resizable()
                 .scaledToFit()
-                .frame(maxWidth: 200)
+                .frame(maxWidth: featuredImageMaxWidth)
                 .parallax3D()
                 .padding(.horizontal, Spacing.lg)
 
@@ -325,7 +355,7 @@ struct OnboardingView: View {
                 Image("milk")
                     .resizable()
                     .scaledToFit()
-                    .frame(maxWidth: 200)
+                    .frame(maxWidth: featuredImageMaxWidth)
                     .parallax3D()
                     .padding(.horizontal, Spacing.lg)
 
@@ -458,7 +488,7 @@ struct OnboardingView: View {
                 Image("instructions")
                     .resizable()
                     .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: 450)
+                    .frame(maxWidth: instructionsImageMaxWidth)
                     .padding(.horizontal, Spacing.md)
 
                 Spacer()
@@ -592,6 +622,55 @@ struct OnboardingView: View {
         }
     }
 
+    private func addFriend(from contact: CNContact) async {
+        // Get primary phone/email for display/saving
+        let phoneNumber = contact.phoneNumbers.first?.value.stringValue
+        let email = contact.emailAddresses.first?.value as String?
+        
+        // Get ALL phones and emails for discovery
+        let phoneNumbers = contact.phoneNumbers.map { $0.value.stringValue }
+        let emails = contact.emailAddresses.map { $0.value as String }
+        
+        let name = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
+
+        HapticManager.itemAdded()
+
+        // Get contact's photo if available
+        var imageData: Data?
+        if contact.imageDataAvailable {
+            imageData = contact.imageData
+        }
+
+        // Try to discover if friend has the app (tries all phones and emails)
+        var friendUserRecordID: String?
+        do {
+            if let recordID = try await cloudKit.discoverUser(phoneNumbers: phoneNumbers, emails: emails) {
+                friendUserRecordID = recordID.recordName
+                print("✅ Discovered friend has app! Record ID: \(recordID.recordName)")
+            } else {
+                print("ℹ️ Friend hasn't installed the app yet")
+            }
+        } catch {
+            print("⚠️ Error discovering user: \(error)")
+        }
+
+        // Save friend to SwiftData (Local Storage)
+        let newFriend = Friend(
+            name: name,
+            phoneNumber: phoneNumber,
+            email: email,
+            hasApp: friendUserRecordID != nil,
+            friendUserRecordID: friendUserRecordID,
+            imageData: imageData
+        )
+        
+        await MainActor.run {
+            modelContext.insert(newFriend)
+            try? modelContext.save()
+        }
+    }
+
+
     private func processFriends() {
         guard !selectedContacts.isEmpty else {
             moveToChildrenScreen()
@@ -603,39 +682,14 @@ struct OnboardingView: View {
 
         Task {
             for (index, contact) in selectedContacts.enumerated() {
-                let phoneNumber = contact.phoneNumbers.first?.value.stringValue
-                let email = contact.emailAddresses.first?.value as String?
-
-                // Get contact's photo if available
-                var imageData: Data?
-                if contact.imageDataAvailable {
-                    imageData = contact.imageData
-                }
-
-                let name = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
-
+                let contactName = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
+                
                 do {
-                    // Try to discover if friend has the app by email
-                    var friendUserRecordID: String?
-                    if let email = email {
-                        if let recordID = try await cloudKit.discoverUserByEmail(email) {
-                            friendUserRecordID = recordID.recordName
-                        }
-                    }
-
-                    // Save friend to CloudKit
-                    _ = try await cloudKit.saveFriend(
-                        name: name,
-                        phoneNumber: phoneNumber,
-                        email: email,
-                        imageData: imageData,
-                        friendUserRecordID: friendUserRecordID
-                    )
+                    await addFriend(from: contact)
                 } catch let ckError as CKError where ckError.code == .quotaExceeded {
                     // CloudKit quota exceeded - show error and stop processing
-                    print("❌ CloudKit quota exceeded while adding \(name)")
+                    print("❌ CloudKit quota exceeded while adding friend")
                     await MainActor.run {
-                        failedFriends.append(name)
                         errorMessage = ckError.userFriendlyMessage
                         showingError = true
                         isProcessing = false
@@ -643,9 +697,9 @@ struct OnboardingView: View {
                     break // Stop processing remaining contacts
                 } catch {
                     // Other error - log and continue with next contact
-                    print("❌ Failed to add friend \(name): \(error)")
+                    print("❌ Failed to add friend \(contactName): \(error)")
                     await MainActor.run {
-                        failedFriends.append(name)
+                        failedFriends.append(contactName)
                     }
                 }
 
@@ -683,7 +737,19 @@ struct OnboardingView: View {
         Task {
             for (index, name) in childrenToAdd.enumerated() {
                 do {
-                    _ = try await cloudKit.saveChild(name: name)
+                    let record = try await cloudKit.saveChild(name: name)
+                    
+                    // Save to SwiftData
+                    await MainActor.run {
+                        let newChild = Child(
+                            id: UUID(uuidString: record.recordID.recordName) ?? UUID(),
+                            name: name,
+                            parentId: currentUserId,
+                            createdAt: record.creationDate ?? Date()
+                        )
+                        modelContext.insert(newChild)
+                        try? modelContext.save()
+                    }
                 } catch {
                     print("Failed to add child \(name): \(error)")
                 }
@@ -713,6 +779,8 @@ struct MultiContactPickerView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> CNContactPickerViewController {
         let picker = CNContactPickerViewController()
         picker.delegate = context.coordinator
+        // Explicitly allow selection of any contact to prevent "details mode"
+        picker.predicateForSelectionOfContact = NSPredicate(value: true)
         return picker
     }
 

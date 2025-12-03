@@ -6,6 +6,113 @@
 //
 
 import SwiftUI
+import ContactsUI
+
+// MARK: - Contact Picker Wrapper
+struct ContactPickerView: UIViewControllerRepresentable {
+    let onContactsSelected: ([CNContact]) -> Void
+    let multiSelect: Bool
+
+    init(multiSelect: Bool = true, onContactsSelected: @escaping ([CNContact]) -> Void) {
+        self.multiSelect = multiSelect
+        self.onContactsSelected = onContactsSelected
+    }
+
+    func makeUIViewController(context: Context) -> CNContactPickerViewController {
+        let picker = CNContactPickerViewController()
+        picker.delegate = context.coordinator
+        // Explicitly allow selection of any contact to prevent "details mode"
+        picker.predicateForSelectionOfContact = NSPredicate(value: true)
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: CNContactPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    class Coordinator: NSObject, CNContactPickerDelegate {
+        let parent: ContactPickerView
+
+        init(parent: ContactPickerView) {
+            self.parent = parent
+        }
+
+        func contactPicker(_ picker: CNContactPickerViewController, didSelect contacts: [CNContact]) {
+            parent.onContactsSelected(contacts)
+        }
+        
+        func contactPicker(_ picker: CNContactPickerViewController, didSelect contact: CNContact) {
+            if !parent.multiSelect {
+                parent.onContactsSelected([contact])
+            }
+        }
+        
+        func contactPickerDidCancel(_ picker: CNContactPickerViewController) {
+            parent.onContactsSelected([])
+        }
+    }
+}
+
+// MARK: - Wishlist Item Photo
+struct WishlistItemPhoto: View {
+    let imageData: Data?
+    let showCheckmark: Bool
+    let randomRotation: Double
+
+    init(imageData: Data?, showCheckmark: Bool = false) {
+        self.imageData = imageData
+        self.showCheckmark = showCheckmark
+
+        // Generate random rotation between -5 and 5 degrees
+        // Use imageData hash for consistent rotation per image
+        if let data = imageData {
+            let hash = data.hashValue
+            self.randomRotation = Double((hash % 11) - 5) // Range: -5 to 5
+        } else {
+            self.randomRotation = 0
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .center) {
+            if let imageData = imageData,
+               let uiImage = UIImage(data: imageData) {
+                Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 76)
+                        .clipShape(RoundedRectangle(cornerRadius: 2))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 2)
+                                .stroke(Color.white, lineWidth: 5)
+                        )
+                        .shadow(
+                            color: Color.black.opacity(0.15),
+                            radius: 4,
+                            x: randomRotation > 0 ? 2 : -2,
+                            y: 3
+                        )
+                        .rotationEffect(.degrees(randomRotation))
+            }
+
+            if showCheckmark && imageData != nil {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(.successGreen)
+                    .background(
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 24, height: 24)
+                    )
+                    .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
+                    .zIndex(1)
+            }
+        }
+        .frame(height: 84) // Extra space for rotation and border, variable width
+    }
+}
 
 // MARK: - Primary Button Style
 struct PrimaryButtonStyle: ButtonStyle {
@@ -125,11 +232,22 @@ struct WishlistItemRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.md) {
+            // Photo on the left (or spacer to maintain alignment)
+            if item.imageData != nil {
+                WishlistItemPhoto(
+                    imageData: item.imageData,
+                    showCheckmark: item.isPurchased && !showPurchaseButton
+                )
+            } else {
+                // Reserve space to keep text aligned
+                Color.clear
+                    .frame(width: 84, height: 84)
+            }
+
             Text(item.name)
-                .font(.custom("Caveat", size: 32))
+                .font(.custom("Caveat", size: 27))
                 .lineSpacing(-18)
-                .foregroundColor(item.isPurchased ? .warmGray : .warmBlack)
-                .strikethrough(item.isPurchased, color: .warmGray)
+                .foregroundColor(.warmBlack)
                 .lineLimit(2)
 
             Spacer()
@@ -139,13 +257,19 @@ struct WishlistItemRow: View {
                     onTogglePurchase?()
                 }) {
                     Image(systemName: item.isPurchased ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 28))
-                        .foregroundColor(item.isPurchased ? .successGreen : .warmGrayLight)
+                    .font(.system(size: 28))
+                    .foregroundColor(item.isPurchased ? .successGreen : .warmGrayLight)
                 }
                 .buttonStyle(PlainButtonStyle())
+            } else if item.isPurchased && item.imageData == nil {
+                // Show non-interactive checkmark for user's own purchased items (only if no photo)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.successGreen)
             }
         }
-        .padding(.horizontal, Spacing.md)
+        .padding(.leading, Spacing.md)
+        .padding(.trailing, Spacing.xs)
         .padding(.vertical, Spacing.sm)
         .cornerRadius(CornerRadius.md)
         .shadow(
@@ -159,9 +283,15 @@ struct WishlistItemRow: View {
 
 // MARK: - Friend Row
 struct FriendRow: View {
-    let friend: CKFriend
+    let friend: Friend
     let itemCount: Int?
-    let onInvite: () -> Void
+    let onInvite: (() -> Void)?
+
+    init(friend: Friend, itemCount: Int? = nil, onInvite: (() -> Void)? = nil) {
+        self.friend = friend
+        self.itemCount = itemCount
+        self.onInvite = onInvite
+    }
 
     var body: some View {
         HStack(spacing: Spacing.md) {
@@ -177,13 +307,7 @@ struct FriendRow: View {
                 } else {
                     ZStack {
                         Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.forestGreenLight, Color.forestGreen],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
+                            .fill(Color.goldLight.opacity(0.3))
                             .frame(width: 48, height: 48)
 
                         Text(ChristmasEmojis.emoji(for: friend.name))
@@ -223,7 +347,7 @@ struct FriendRow: View {
                 Image(systemName: "chevron.right")
                     .font(.bodySmall)
                     .foregroundColor(.warmGrayLight)
-            } else {
+            } else if let onInvite = onInvite {
                 Button(action: onInvite) {
                     HStack(spacing: 4) {
                         Image(systemName: "paperplane.fill")
@@ -310,4 +434,45 @@ struct ChildRow: View {
         .background(Color.creamCard.opacity(0.6))
         .cornerRadius(CornerRadius.md)
     }
+}
+
+// MARK: - Snowflake Loading View
+
+struct SnowflakeLoadingView: View {
+    let message: String?
+    @State private var isRotating = false
+
+    init(_ message: String? = nil) {
+        self.message = message
+    }
+
+    var body: some View {
+        VStack(spacing: Spacing.md) {
+            Text("❄️")
+                .font(.system(size: 36))
+                .rotationEffect(.degrees(isRotating ? 360 : 0))
+                .animation(
+                    .linear(duration: 5)
+                    .repeatForever(autoreverses: false),
+                    value: isRotating
+                )
+                .onAppear {
+                    isRotating = true
+                }
+
+            if let message = message {
+                Text(message)
+                    .font(.bodyMedium)
+                    .foregroundColor(.warmGray)
+            }
+        }
+    }
+}
+
+// MARK: - Identifiable URL Wrapper
+
+/// Wrapper to make URL conform to Identifiable for use with .sheet(item:)
+struct IdentifiableURL: Identifiable {
+    let id = UUID()
+    let url: URL
 }

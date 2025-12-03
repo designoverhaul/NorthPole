@@ -65,21 +65,21 @@ enum DemoDataGenerator {
                 phoneNumber: "555-0101",
                 email: "david@example.com",
                 hasApp: true,
-                userId: davidId
+                friendUserRecordID: davidId.uuidString
             ),
             Friend(
                 name: "Lisa",
                 phoneNumber: "555-0102",
                 email: "lisa@example.com",
                 hasApp: true,
-                userId: lisaId
+                friendUserRecordID: lisaId.uuidString
             ),
             Friend(
                 name: "Connor",
                 phoneNumber: "555-0103",
                 email: "connor@example.com",
                 hasApp: false,
-                userId: nil
+                friendUserRecordID: nil
             )
         ]
 
@@ -148,7 +148,7 @@ enum DemoDataGenerator {
             phoneNumber: "555-0104",
             email: "sarah@example.com",
             hasApp: true,
-            userId: sarahId
+            friendUserRecordID: sarahId.uuidString
         )
         context.insert(sarah)
 

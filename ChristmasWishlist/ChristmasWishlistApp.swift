@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CloudKit
+import SwiftData
 import OSLog
 import Combine
 
@@ -21,23 +22,72 @@ struct ChristmasWishlistApp: App {
         let _ = print("🎄 [APP] Body evaluated - hasCompletedOnboarding = \(hasCompletedOnboarding)")
 
         return WindowGroup {
-            Group {
-                if hasCompletedOnboarding {
-                    MainTabView()
-                        .preferredColorScheme(.light)
-                        .onAppear {
-                            print("🎄 [APP] ✅ MainTabView appeared - SUCCESS!")
-                        }
-                } else {
-                    OnboardingView(isCompleted: $hasCompletedOnboarding)
-                        .preferredColorScheme(.light)
-                        .onAppear {
-                            print("🎄 [APP] OnboardingView appeared - hasCompletedOnboarding = \(hasCompletedOnboarding)")
-                        }
-                }
+            RootView()
+        }
+        .modelContainer(Self.sharedModelContainer)
+    }
+    
+    static var sharedModelContainer: ModelContainer = {
+        let schema = Schema([
+            Friend.self,
+            Child.self,
+            WishlistItem.self
+        ])
+        
+        let modelConfiguration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false
+        )
+
+        do {
+            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            container.mainContext.autosaveEnabled = true
+            print("✅ [APP] ModelContainer initialized successfully")
+            return container
+        } catch {
+            print("❌ [APP] Failed to initialize ModelContainer: \(error)")
+            fatalError("Could not create ModelContainer: \(error)")
+        }
+    }()
+}
+
+struct RootView: View {
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @Environment(\.modelContext) private var modelContext
+    @StateObject private var deepLinkManager = DeepLinkManager.shared
+    
+    var body: some View {
+        Group {
+            if hasCompletedOnboarding {
+                MainTabView()
+                    .preferredColorScheme(.light)
+                    .onAppear {
+                        print("🎄 [APP] ✅ MainTabView appeared - SUCCESS!")
+                    }
+            } else {
+                OnboardingView(isCompleted: $hasCompletedOnboarding)
+                    .preferredColorScheme(.light)
+                    .onAppear {
+                        print("🎄 [APP] OnboardingView appeared - hasCompletedOnboarding = \(hasCompletedOnboarding)")
+                    }
             }
-            .onChange(of: hasCompletedOnboarding) { oldValue, newValue in
-                print("🎄 [APP] ⚡ hasCompletedOnboarding changed from \(oldValue) to \(newValue)")
+        }
+        .onChange(of: hasCompletedOnboarding) { oldValue, newValue in
+            print("🎄 [APP] ⚡ hasCompletedOnboarding changed from \(oldValue) to \(newValue)")
+        }
+        .onOpenURL { url in
+            deepLinkManager.handle(url: url, modelContext: modelContext)
+        }
+        .alert("Add Friend?", isPresented: $deepLinkManager.showAddConfirmation) {
+            Button("Cancel", role: .cancel) {
+                deepLinkManager.showAddConfirmation = false
+            }
+            Button("Add Friend") {
+                deepLinkManager.confirmAddFriend(modelContext: modelContext)
+            }
+        } message: {
+            if let name = deepLinkManager.pendingFriendName {
+                Text("Do you want to add \(name) to your friends list?")
             }
         }
     }
@@ -47,6 +97,7 @@ struct ChristmasWishlistApp: App {
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     private var cloudKitObserver: Task<Void, Never>?
+    private var syncTimer: Timer?
 
     func application(
         _ application: UIApplication,
@@ -102,15 +153,293 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                 // Poll every 30 seconds to check for new purchases
                 cloudKit.startPurchasePolling(interval: 30)
 
-                // Preload friends data in background for instant display
-                print("🚀 [APP] Starting friends preload...")
-                await cloudKit.preloadFriendsData()
+                // Friends data is now loaded locally in FriendsListView
+
+                // Run one-time migration to sync existing SwiftData items to CloudKit
+                await runCloudKitMigrationIfNeeded()
+
+                // Download latest items from CloudKit to SwiftData (merge strategy)
+                await downloadCloudKitToSwiftData()
+
+                // DISABLED: Background sync creates duplicates - needs deduplication logic
+                // await startBackgroundSync()
             } catch {
                 logger.error("Failed to subscribe to CloudKit changes: \(error.localizedDescription)")
             }
         }
 
         return true
+    }
+
+    @MainActor
+    private func startBackgroundSync() {
+        print("🔄 [SYNC] Starting background sync timer...")
+
+        // Sync every 30 seconds
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.syncSwiftDataToCloudKit()
+            }
+        }
+    }
+
+    @MainActor
+    private func syncSwiftDataToCloudKit() async {
+        print("🔄 [SYNC] Background sync: SwiftData → CloudKit")
+
+        do {
+            let context = ChristmasWishlistApp.sharedModelContainer.mainContext
+            let cloudKit = CloudKitManager.shared
+
+            guard cloudKit.isSignedInToiCloud else {
+                print("⚠️ [SYNC] Not signed in, skipping sync")
+                return
+            }
+
+            // Fetch all items from SwiftData
+            let descriptor = FetchDescriptor<WishlistItem>()
+            let items = try context.fetch(descriptor)
+
+            // Fetch all children
+            let childDescriptor = FetchDescriptor<Child>()
+            let children = try context.fetch(childDescriptor)
+
+            // Sync each item to CloudKit
+            for item in items {
+                // Determine owner
+                var ownerRecordID: String? = nil
+                if let child = children.first(where: { $0.id == item.ownerId }) {
+                    // Ensure child has CloudKit record
+                    if child.cloudKitRecordID == nil {
+                        let childRecord = try await cloudKit.saveChild(name: child.name)
+                        child.cloudKitRecordID = childRecord.recordID.recordName
+                        try context.save()
+                    }
+                    ownerRecordID = child.cloudKitRecordID
+                }
+
+                // Upload to CloudKit
+                let _ = try await cloudKit.saveWishlistItem(
+                    name: item.name,
+                    url: item.url,
+                    description: item.itemDescription,
+                    imageData: item.imageData,
+                    ownerRecordID: ownerRecordID
+                )
+            }
+
+            print("✅ [SYNC] Synced \(items.count) items to CloudKit")
+        } catch {
+            print("❌ [SYNC] Background sync failed: \(error)")
+        }
+    }
+
+    @MainActor
+    private func downloadCloudKitToSwiftData() async {
+        print("📥 [DOWNLOAD] Downloading items from CloudKit to SwiftData...")
+
+        do {
+            let context = ChristmasWishlistApp.sharedModelContainer.mainContext
+            let cloudKit = CloudKitManager.shared
+
+            guard cloudKit.isSignedInToiCloud else {
+                print("⚠️ [DOWNLOAD] Not signed in, skipping download")
+                return
+            }
+
+            // Get or create a consistent user ID
+            let currentUserId = AppGroupContainer.getCurrentUserId() ?? {
+                let newId = UUID()
+                AppGroupContainer.saveCurrentUserId(newId)
+                return newId
+            }()
+            print("📥 [DOWNLOAD] Using user ID: \(currentUserId)")
+
+            // Fetch items from CloudKit
+            let cloudKitRecords = try await cloudKit.fetchMyWishlistItems()
+            print("📥 [DOWNLOAD] Fetched \(cloudKitRecords.count) items from CloudKit")
+
+            // Fetch children from CloudKit
+            let childRecords = try await cloudKit.fetchMyChildren()
+            print("📥 [DOWNLOAD] Fetched \(childRecords.count) children from CloudKit")
+
+            // Create/update children in SwiftData
+            for childRecord in childRecords {
+                let childName = childRecord["name"] as? String ?? "Unknown"
+                let cloudKitRecordID = childRecord.recordID.recordName
+
+                // Check if child already exists by CloudKit ID
+                let childDescriptor = FetchDescriptor<Child>(
+                    predicate: #Predicate { $0.cloudKitRecordID == cloudKitRecordID }
+                )
+                let existingChildren = try context.fetch(childDescriptor)
+
+                if existingChildren.isEmpty {
+                    // Also check by name to avoid duplicates
+                    let nameDescriptor = FetchDescriptor<Child>(
+                        predicate: #Predicate { $0.name == childName }
+                    )
+                    let existingByName = try context.fetch(nameDescriptor)
+
+                    if existingByName.isEmpty {
+                        // Create new child
+                        let newChild = Child(
+                            name: childName,
+                            parentId: currentUserId,
+                            cloudKitRecordID: cloudKitRecordID
+                        )
+                        context.insert(newChild)
+                        print("📥 [DOWNLOAD] Created child '\(childName)' with CloudKit ID \(cloudKitRecordID)")
+                    } else {
+                        // Update existing child with CloudKit ID
+                        if let existingChild = existingByName.first {
+                            existingChild.cloudKitRecordID = cloudKitRecordID
+                            print("📥 [DOWNLOAD] Updated existing child '\(childName)' with CloudKit ID")
+                        }
+                    }
+                }
+            }
+
+            try context.save()
+
+            // Re-fetch children to get IDs
+            let allChildrenDescriptor = FetchDescriptor<Child>()
+            let allChildren = try context.fetch(allChildrenDescriptor)
+
+            // Create/update items in SwiftData
+            var createdCount = 0
+            for record in cloudKitRecords {
+                let itemName = record["name"] as? String ?? "Unknown"
+                let itemURL = record["url"] as? String
+                let itemDesc = record["itemDescription"] as? String
+                let imageAsset = record["image"] as? CKAsset
+                let ownerRef = record["ownerID"] as? CKRecord.Reference
+                let ownerCloudKitID = ownerRef?.recordID.recordName
+
+                // Determine local owner (user or child)
+                var localOwnerID = currentUserId // Default to current user
+
+                // If this item has an owner that's NOT the current user, it must be a child
+                if let ownerCloudKitID = ownerCloudKitID,
+                   ownerCloudKitID != cloudKit.currentUserRecordID?.recordName {
+                    // Find the child with this CloudKit record ID
+                    if let child = allChildren.first(where: { $0.cloudKitRecordID == ownerCloudKitID }) {
+                        localOwnerID = child.id
+                        print("📥 [DOWNLOAD] Item '\(itemName)' belongs to child '\(child.name)'")
+                    }
+                }
+
+                // Check if item already exists by name AND owner (prevent duplicates)
+                let itemDescriptor = FetchDescriptor<WishlistItem>(
+                    predicate: #Predicate { $0.name == itemName && $0.ownerId == localOwnerID }
+                )
+                let existingItems = try context.fetch(itemDescriptor)
+
+                if existingItems.isEmpty {
+                    // Download image data if available
+                    var imageData: Data? = nil
+                    if let imageAsset = imageAsset, let fileURL = imageAsset.fileURL {
+                        imageData = try? Data(contentsOf: fileURL)
+                        print("📥 [DOWNLOAD] Downloaded image for '\(itemName)': \(imageData?.count ?? 0) bytes")
+                    }
+
+                    // Create new item
+                    let newItem = WishlistItem(
+                        name: itemName,
+                        url: itemURL,
+                        itemDescription: itemDesc,
+                        ownerId: localOwnerID,
+                        imageData: imageData
+                    )
+                    context.insert(newItem)
+                    createdCount += 1
+                    print("📥 [DOWNLOAD] Created item '\(itemName)' for owner \(localOwnerID)")
+                }
+            }
+
+            try context.save()
+            print("✅ [DOWNLOAD] Downloaded and created \(createdCount)/\(cloudKitRecords.count) items from CloudKit")
+        } catch {
+            print("❌ [DOWNLOAD] Failed to download from CloudKit: \(error)")
+        }
+    }
+
+    @MainActor
+    private func runCloudKitMigrationIfNeeded() async {
+        let migrationKey = "hasRunCloudKitMigration_v1"
+
+        // Check if migration has already run
+        guard !UserDefaults.standard.bool(forKey: migrationKey) else {
+            print("✅ [MIGRATION] CloudKit migration already completed")
+            return
+        }
+
+        print("🔄 [MIGRATION] Starting CloudKit migration for existing items...")
+
+        do {
+            // Get model context from shared container
+            let context = ChristmasWishlistApp.sharedModelContainer.mainContext
+            let cloudKit = CloudKitManager.shared
+
+            // Fetch all wishlist items from SwiftData
+            let descriptor = FetchDescriptor<WishlistItem>()
+            let items = try context.fetch(descriptor)
+
+            print("📦 [MIGRATION] Found \(items.count) existing items to sync")
+
+            // Fetch all children
+            let childDescriptor = FetchDescriptor<Child>()
+            let children = try context.fetch(childDescriptor)
+            print("👶 [MIGRATION] Found \(children.count) children")
+
+            // Create CloudKit records for all children first
+            for child in children {
+                if child.cloudKitRecordID == nil {
+                    print("☁️ [MIGRATION] Creating CloudKit record for child '\(child.name)'...")
+                    let childRecord = try await cloudKit.saveChild(name: child.name)
+                    child.cloudKitRecordID = childRecord.recordID.recordName
+                    try context.save()
+                    print("✅ [MIGRATION] Created CloudKit child: \(childRecord.recordID.recordName)")
+                }
+            }
+
+            // Sync each item to CloudKit
+            var successCount = 0
+            for item in items {
+                print("☁️ [MIGRATION] Syncing '\(item.name)'...")
+
+                // Determine owner
+                var ownerRecordID: String? = nil
+                if let child = children.first(where: { $0.id == item.ownerId }) {
+                    ownerRecordID = child.cloudKitRecordID
+                    print("   → Owner: child '\(child.name)' (\(ownerRecordID ?? "nil"))")
+                } else {
+                    print("   → Owner: current user")
+                }
+
+                do {
+                    let _ = try await cloudKit.saveWishlistItem(
+                        name: item.name,
+                        url: item.url,
+                        description: item.itemDescription,
+                        imageData: item.imageData,
+                        ownerRecordID: ownerRecordID
+                    )
+                    successCount += 1
+                    print("✅ [MIGRATION] Synced '\(item.name)'")
+                } catch {
+                    print("❌ [MIGRATION] Failed to sync '\(item.name)': \(error)")
+                }
+            }
+
+            print("🎉 [MIGRATION] Completed! Synced \(successCount)/\(items.count) items")
+
+            // Mark migration as complete
+            UserDefaults.standard.set(true, forKey: migrationKey)
+
+        } catch {
+            print("❌ [MIGRATION] Migration failed: \(error)")
+        }
     }
 
     func application(

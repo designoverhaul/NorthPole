@@ -33,13 +33,15 @@ struct ShareExtensionView: View {
                     .ignoresSafeArea()
 
                 if isLoading {
-                    VStack {
-                        ProgressView("Loading...")
-                            .tint(.forestGreen)
+                    VStack(spacing: 16) {
+                        Text("❄️")
+                            .font(.system(size: 36))
+                        Text("Loading...")
+                            .font(.body)
+                            .foregroundColor(.warmGray)
                         Text("Debug: Loading shared content...")
                             .font(.caption)
                             .foregroundColor(.warmGray)
-                            .padding(.top)
                     }
                 } else {
                     ScrollView {

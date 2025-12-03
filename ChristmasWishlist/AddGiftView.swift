@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import CloudKit
 
 struct AddGiftView: View {
     @Environment(\.modelContext) private var modelContext
@@ -16,9 +17,19 @@ struct AddGiftView: View {
     let onItemAdded: () -> Void
     let itemToEdit: WishlistItem?
 
+    @ObservedObject private var cloudKit = CloudKitManager.shared
+    @State private var children: [CKChild] = []
     @State private var name = ""
     @State private var url = ""
     @State private var description = ""
+    @State private var selectedImage: UIImage?
+    @State private var showingImagePicker = false
+    @State private var showingLinkHelp = false
+    @State private var isSyncingToCloud = false
+    @State private var clipboardHasContent = false
+    @State private var isExtractingData = false
+    @State private var isCleaningTitle = false
+    @State private var previousURLLength = 0
     @FocusState private var focusedField: Field?
 
     enum Field {
@@ -43,6 +54,9 @@ struct AddGiftView: View {
             _name = State(initialValue: item.name)
             _url = State(initialValue: item.url ?? "")
             _description = State(initialValue: item.itemDescription ?? "")
+            if let imageData = item.imageData, let uiImage = UIImage(data: imageData) {
+                _selectedImage = State(initialValue: uiImage)
+            }
         }
     }
 
@@ -72,6 +86,18 @@ struct AddGiftView: View {
                                         .stroke(focusedField == .name ? Color.forestGreen : Color.warmGrayLight, lineWidth: 2)
                                 )
                                 .focused($focusedField, equals: .name)
+
+                            // Title cleaning indicator
+                            if isCleaningTitle {
+                                HStack(spacing: Spacing.sm) {
+                                    Text("✨")
+                                        .font(.system(size: 16))
+                                    Text("Cleaning title...")
+                                        .font(.caption)
+                                        .foregroundColor(.forestGreen)
+                                }
+                                .padding(.top, Spacing.xs)
+                            }
                         }
 
                         // URL field (optional)
@@ -82,27 +108,48 @@ struct AddGiftView: View {
                                     .fontWeight(.semibold)
                                     .foregroundColor(.warmBlack)
 
-                                Text("(Optional)")
-                                    .font(.caption)
-                                    .foregroundColor(.warmGray)
+                                Spacer()
+
+                                Button(action: {
+                                    HapticManager.buttonTapped()
+                                    showingLinkHelp = true
+                                }) {
+                                    Image(systemName: "questionmark.circle")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.forestGreen)
+                                }
                             }
 
-                            ZStack(alignment: .leading) {
-                                if url.isEmpty {
-                                    Text("https://example.com/product")
-                                        .font(.bodyMedium)
-                                        .foregroundColor(.gray.opacity(0.5))
-                                        .padding(Spacing.md)
-                                        .allowsHitTesting(false)
-                                }
-
-                                TextField("", text: $url)
+                            HStack(spacing: 0) {
+                                TextField("https://example.com/product", text: $url)
                                     .font(.bodyMedium)
                                     .foregroundColor(.warmBlack)
                                     .keyboardType(.URL)
                                     .autocapitalization(.none)
                                     .padding(Spacing.md)
                                     .focused($focusedField, equals: .url)
+                                    .tint(.forestGreen)
+
+                                Button(action: {
+                                    if let pastedString = UIPasteboard.general.string {
+                                        url = pastedString
+                                    }
+                                    HapticManager.buttonTapped()
+                                    checkClipboard()
+                                }) {
+                                    Text("Paste")
+                                        .font(.bodyMedium)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, Spacing.md)
+                                        .padding(.vertical, Spacing.sm)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: CornerRadius.sm)
+                                                .fill(clipboardHasContent ? Color.forestGreen : Color.warmGrayLight)
+                                        )
+                                }
+                                .disabled(!clipboardHasContent)
+                                .padding(.trailing, Spacing.sm)
                             }
                             .background(Color.white)
                             .cornerRadius(CornerRadius.md)
@@ -110,20 +157,29 @@ struct AddGiftView: View {
                                 RoundedRectangle(cornerRadius: CornerRadius.md)
                                     .stroke(focusedField == .url ? Color.forestGreen : Color.warmGrayLight, lineWidth: 2)
                             )
+                            .onChange(of: url) { oldValue, newValue in
+                                handleURLChange(oldValue: oldValue, newValue: newValue)
+                            }
+
+                            // Extraction indicator
+                            if isExtractingData {
+                                HStack(spacing: Spacing.sm) {
+                                    Text("❄️")
+                                        .font(.system(size: 16))
+                                    Text("Extracting product info...")
+                                        .font(.caption)
+                                        .foregroundColor(.forestGreen)
+                                }
+                                .padding(.top, Spacing.xs)
+                            }
                         }
 
                         // Description field (optional)
                         VStack(alignment: .leading, spacing: Spacing.sm) {
-                            HStack {
-                                Text("Description")
-                                    .font(.bodyMedium)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.warmBlack)
-
-                                Text("(Optional)")
-                                    .font(.caption)
-                                    .foregroundColor(.warmGray)
-                            }
+                            Text("Description")
+                                .font(.bodyMedium)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.warmBlack)
 
                             TextField("Add any notes or preferences...", text: $description, axis: .vertical)
                                 .font(.bodyMedium)
@@ -139,6 +195,55 @@ struct AddGiftView: View {
                                 .focused($focusedField, equals: .description)
                         }
 
+                        // Photo section
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            Text("Photo")
+                                .font(.bodyMedium)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.warmBlack)
+
+                            if let selectedImage = selectedImage {
+                                // Show selected image
+                                VStack(spacing: Spacing.sm) {
+                                    Image(uiImage: selectedImage)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(maxWidth: .infinity)
+                                        .frame(maxHeight: 300)
+                                        .cornerRadius(CornerRadius.md)
+
+                                    Button(action: {
+                                        showingImagePicker = true
+                                    }) {
+                                        HStack {
+                                            Image(systemName: "photo")
+                                            Text("Change Photo")
+                                        }
+                                        .font(.bodyMedium)
+                                        .foregroundColor(.forestGreen)
+                                    }
+                                }
+                            } else {
+                                // Show add photo button
+                                Button(action: {
+                                    showingImagePicker = true
+                                }) {
+                                    Image(systemName: "photo.badge.plus")
+                                        .font(.system(size: 24))
+                                        .foregroundColor(.forestGreen)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(Spacing.lg)
+                                    .background(Color.white)
+                                    .cornerRadius(CornerRadius.md)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                                            .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [5]))
+                                            .foregroundColor(.warmGrayLight)
+                                    )
+                                }
+                            }
+                        }
+
                         // Save button
                         Button(action: saveItem) {
                             HStack {
@@ -152,6 +257,28 @@ struct AddGiftView: View {
                         .disabled(!isFormValid)
                         .opacity(isFormValid ? 1.0 : 0.5)
                         .padding(.top, Spacing.md)
+                        
+                        // Delete button (only in edit mode)
+                        if isEditMode {
+                            Button(action: deleteItem) {
+                                HStack {
+                                    Image(systemName: "trash")
+                                    Text("Delete Gift")
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundColor(.warmGray)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, Spacing.lg)
+                                .padding(.vertical, Spacing.md)
+                                .background(Color.creamCard)
+                                .cornerRadius(CornerRadius.md)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CornerRadius.md)
+                                        .stroke(Color.warmGrayLight, lineWidth: 1.5)
+                                )
+                            }
+                            .padding(.top, Spacing.sm)
+                        }
                     }
                     .padding(Spacing.lg)
                 }
@@ -167,8 +294,26 @@ struct AddGiftView: View {
                     .foregroundColor(.warmGray)
                 }
             }
+            .task {
+                // Load children from CloudKit
+                if cloudKit.isSignedInToiCloud {
+                    await loadChildren()
+                }
+            }
+            .onChange(of: cloudKit.shouldRefreshChildren) { _, _ in
+                Task {
+                    await loadChildren()
+                }
+            }
             .onAppear {
                 focusedField = .name
+                checkClipboard()
+            }
+            .sheet(isPresented: $showingImagePicker) {
+                ImagePicker(image: $selectedImage)
+            }
+            .sheet(isPresented: $showingLinkHelp) {
+                LinkHelpView()
             }
         }
     }
@@ -177,26 +322,295 @@ struct AddGiftView: View {
         guard isFormValid else { return }
 
         HapticManager.itemAdded()
+        isSyncingToCloud = true
+
+        let imageData = selectedImage?.jpegData(compressionQuality: 0.7)
+        print("💾 AddGiftView saveItem - selectedImage exists: \(selectedImage != nil), imageData bytes: \(imageData?.count ?? 0)")
 
         if let existingItem = itemToEdit {
             // Update existing item
             existingItem.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
             existingItem.url = url.isEmpty ? nil : url.trimmingCharacters(in: .whitespacesAndNewlines)
             existingItem.itemDescription = description.isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines)
+            existingItem.imageData = imageData
+            print("✏️ Updated item '\(existingItem.name)' with imageData: \(existingItem.imageData != nil)")
+
+            // Sync update to CloudKit
+            Task {
+                await syncItemToCloudKit(item: existingItem, isNew: false)
+            }
         } else {
             // Create new item
             let newItem = WishlistItem(
                 name: name.trimmingCharacters(in: .whitespacesAndNewlines),
                 url: url.isEmpty ? nil : url.trimmingCharacters(in: .whitespacesAndNewlines),
                 itemDescription: description.isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines),
-                ownerId: userId
+                ownerId: userId,
+                imageData: imageData
             )
             modelContext.insert(newItem)
+            print("➕ Created new item '\(newItem.name)' with imageData: \(newItem.imageData != nil), bytes: \(newItem.imageData?.count ?? 0)")
+
+            // Sync new item to CloudKit immediately
+            Task {
+                await syncItemToCloudKit(item: newItem, isNew: true)
+            }
         }
 
         onItemAdded()
 
         dismiss()
+    }
+
+    private func syncItemToCloudKit(item: WishlistItem, isNew: Bool) async {
+        guard cloudKit.isSignedInToiCloud else {
+            print("⚠️ [SYNC] Not signed in to iCloud, skipping sync")
+            isSyncingToCloud = false
+            return
+        }
+
+        print("☁️ [SYNC] \(isNew ? "Uploading new" : "Updating") item '\(item.name)' to CloudKit...")
+
+        do {
+            // Determine the CloudKit owner record ID
+            var ownerRecordID: String? = nil
+
+            // Check if this item belongs to a child (match by UUID converted from CloudKit record ID)
+            if let childUUID = UUID(uuidString: item.ownerId.uuidString),
+               let child = children.first(where: { UUID(uuidString: $0.id) == childUUID }) {
+                print("☁️ [SYNC] Item belongs to child '\(child.name)'")
+                ownerRecordID = child.id  // Use CloudKit record ID directly
+                print("☁️ [SYNC] Using child's CloudKit recordID as owner: \(ownerRecordID ?? "nil")")
+            } else {
+                // Item belongs to current user (nil means use current user's record ID)
+                print("☁️ [SYNC] Item belongs to current user")
+                ownerRecordID = nil
+            }
+
+            let savedRecord = try await cloudKit.saveWishlistItem(
+                name: item.name,
+                url: item.url,
+                description: item.itemDescription,
+                imageData: item.imageData,
+                ownerRecordID: ownerRecordID
+            )
+
+            print("✅ [SYNC] Successfully synced '\(item.name)' to CloudKit")
+            print("✅ [SYNC] CloudKit recordID: \(savedRecord.recordID.recordName)")
+            print("✅ [SYNC] ownerID: \(savedRecord["ownerID"] as? String ?? "unknown")")
+        } catch {
+            print("❌ [SYNC] Failed to sync item to CloudKit: \(error)")
+            if let ckError = error as? CKError {
+                print("❌ [SYNC] CloudKit error: \(ckError.userFriendlyMessage)")
+            }
+        }
+
+        isSyncingToCloud = false
+    }
+    
+    private func loadChildren() async {
+        guard cloudKit.isSignedInToiCloud else { return }
+        
+        do {
+            let records = try await cloudKit.fetchMyChildren()
+            await MainActor.run {
+                children = records.map { CKChild(from: $0) }
+                print("✅ [ADDGIFT] Loaded \(children.count) children from CloudKit")
+            }
+        } catch {
+            print("❌ [ADDGIFT] Error loading children: \(error)")
+        }
+    }
+    
+    private func deleteItem() {
+        guard let item = itemToEdit else { return }
+        
+        HapticManager.itemDeleted()
+        
+        // Delete from CloudKit first
+        Task {
+            do {
+                // Try to find and delete the CloudKit record
+                if cloudKit.isSignedInToiCloud {
+                    // Determine which owner this item belongs to
+                    var ownerCloudKitID: String?
+                    
+                    // Check if this item belongs to a child
+                    if let childUUID = UUID(uuidString: item.ownerId.uuidString),
+                       let child = children.first(where: { UUID(uuidString: $0.id) == childUUID }) {
+                        // Item belongs to a child - use child's CloudKit record ID
+                        ownerCloudKitID = child.id
+                        print("🗑️ [DELETE] Item '\(item.name)' belongs to child '\(child.name)' (CloudKit ID: \(child.id))")
+                    } else {
+                        // Item belongs to current user - use current user's CloudKit record ID
+                        ownerCloudKitID = cloudKit.currentUserRecordID?.recordName
+                        print("🗑️ [DELETE] Item '\(item.name)' belongs to current user")
+                    }
+                    
+                    // Fetch items for the specific owner
+                    guard let ownerID = ownerCloudKitID else {
+                        print("❌ [DELETE] Could not determine owner CloudKit ID")
+                        return
+                    }
+                    
+                    // Query CloudKit for items with this specific owner
+                    let predicate = NSPredicate(format: "ownerID == %@", ownerID)
+                    let query = CKQuery(recordType: "WishlistItem", predicate: predicate)
+                    let (results, _) = try await cloudKit.publicDatabase.records(matching: query)
+                    let records = results.compactMap { try? $0.1.get() }
+                    
+                    // Find the matching CloudKit record by name
+                    if let matchingRecord = records.first(where: { record in
+                        let recordName = record["name"] as? String ?? ""
+                        return recordName == item.name
+                    }) {
+                        try await cloudKit.deleteWishlistItem(matchingRecord.recordID)
+                        print("✅ [DELETE] Deleted item '\(item.name)' from CloudKit (owner: \(ownerID))")
+                    } else {
+                        print("⚠️ [DELETE] Could not find CloudKit record for item '\(item.name)' with owner \(ownerID)")
+                    }
+                }
+            } catch {
+                print("❌ [DELETE] Failed to delete from CloudKit: \(error)")
+            }
+            
+            // Delete from local database regardless
+            await MainActor.run {
+                modelContext.delete(item)
+                onItemAdded() // Trigger refresh
+                dismiss()
+            }
+        }
+    }
+
+    private func checkClipboard() {
+        clipboardHasContent = UIPasteboard.general.hasStrings
+    }
+
+    // MARK: - URL Extraction
+
+    private func handleURLChange(oldValue: String, newValue: String) {
+        // Detect paste (significant length increase)
+        let lengthIncrease = newValue.count - oldValue.count
+
+        // If user pasted a URL (length increased by >10 chars) and it looks like a URL
+        if lengthIncrease > 10 && newValue.contains(".") && !isExtractingData {
+            extractProductData(from: newValue)
+        }
+
+        previousURLLength = newValue.count
+    }
+
+    private func extractProductData(from urlString: String) {
+        isExtractingData = true
+
+        Task {
+            let productData = await URLProductExtractor.extract(from: urlString)
+
+            // Fill in extracted data (only if fields are currently empty)
+            if let extractedName = productData.name, name.isEmpty {
+                // Set the raw extracted name first (so user sees it immediately)
+                name = extractedName
+
+                // Then clean it up with AI
+                isCleaningTitle = true
+                let cleanedName = await XAIService.shared.cleanProductTitle(extractedName)
+                name = cleanedName
+                isCleaningTitle = false
+            }
+
+            // Only use description if it's meaningfully different from the name
+            if let extractedDescription = productData.description, description.isEmpty {
+                // Check if description is just a duplicate of the name
+                let trimmedDesc = extractedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                // Skip if:
+                // 1. Exactly the same
+                // 2. Description is just name with minor additions (< 30 chars difference)
+                let isIdentical = trimmedDesc.lowercased() == trimmedName.lowercased()
+                let isTooSimilar = trimmedDesc.count < trimmedName.count + 30 &&
+                                  trimmedDesc.lowercased().hasPrefix(trimmedName.lowercased())
+
+                if !isIdentical && !isTooSimilar {
+                    // Use the description - it has meaningful content
+                    if let price = productData.price {
+                        self.description = "\(extractedDescription)\n\nPrice: \(price)"
+                    } else {
+                        self.description = extractedDescription
+                    }
+                } else if let price = productData.price {
+                    // Description is duplicate, so only add price
+                    self.description = "Price: \(price)"
+                }
+            } else if let price = productData.price, description.isEmpty {
+                // Only price available
+                self.description = "Price: \(price)"
+            }
+
+            // Download and set image if available
+            if let imageURL = productData.imageURL, selectedImage == nil {
+                if let imageData = await ProductImageDownloader.shared.downloadImage(from: imageURL),
+                   let image = UIImage(data: imageData) {
+                    selectedImage = image
+                }
+            }
+
+            // Provide haptic feedback on successful extraction
+            if productData.hasData {
+                HapticManager.itemAdded()
+            }
+
+            isExtractingData = false
+        }
+    }
+}
+
+// MARK: - Link Help View
+struct LinkHelpView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.creamBackground
+                    .ignoresSafeArea()
+
+                VStack(spacing: Spacing.md) {
+                    Text("Adding items\nto your wishlist")
+                        .font(.custom("Caveat", size: 36))
+                        .lineSpacing(-8)
+                        .foregroundColor(.warmBlack)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, Spacing.lg)
+                        .padding(.top, Spacing.lg)
+
+                    Image("instructions")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: UIScreen.main.bounds.width * 0.9)
+                        .padding(.horizontal, Spacing.md)
+
+                    Spacer()
+                }
+            }
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: {
+                        HapticManager.buttonTapped()
+                        dismiss()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.warmGray)
+                    }
+                }
+            }
+            .toolbarBackground(.hidden, for: .navigationBar)
+        }
     }
 }
 
