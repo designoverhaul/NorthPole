@@ -21,7 +21,20 @@ struct GiftSuggestion: Identifiable {
 class XAIService: ObservableObject {
     static let shared = XAIService()
 
-    private let apiKey = "REMOVED_API_KEY"
+   
+    
+    // Do this:
+    private let apiKey: String = {
+        // Try to get from environment variable first
+        if let key = ProcessInfo.processInfo.environment["XAI_API_KEY"] {
+            return key
+        }
+        // Fallback - load from a config file that's in .gitignore
+        fatalError("XAI_API_KEY not found in environment")
+    }()
+    
+    
+    
     private let apiURL = "https://api.x.ai/v1/chat/completions"
 
     @Published var isLoading = false
