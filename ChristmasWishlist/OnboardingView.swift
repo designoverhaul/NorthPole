@@ -8,7 +8,6 @@
 import SwiftUI
 import Contacts
 import ContactsUI
-import CloudKit
 import SwiftData
 
 enum OnboardingStep {
@@ -20,18 +19,7 @@ enum OnboardingStep {
 
 struct OnboardingView: View {
     @Environment(\.modelContext) private var modelContext
-    @ObservedObject private var cloudKit = CloudKitManager.shared
     @AppStorage("showPurchasedItems") private var showPurchasedItems = true
-    
-    @State private var currentUserId: UUID = {
-        if let existingId = AppGroupContainer.getCurrentUserId() {
-            return existingId
-        } else {
-            let newId = UUID()
-            AppGroupContainer.saveCurrentUserId(newId)
-            return newId
-        }
-    }()
     @State private var currentStep: OnboardingStep = .welcome
     @State private var showingContactPicker = false
     @State private var selectedContacts: [CNContact] = []
@@ -80,6 +68,9 @@ struct OnboardingView: View {
             case .instructions:
                 instructionsScreen
             }
+        }
+        .onAppear {
+            initializeCurrentUser()
         }
         .onChange(of: isCompleted) { oldValue, newValue in
             print("🎄 [ONBOARDING] ⚡ isCompleted binding changed from \(oldValue) to \(newValue)")
@@ -497,10 +488,29 @@ struct OnboardingView: View {
                 Button {
                     print("🎄 [ONBOARDING] Get Started button pressed")
                     HapticManager.buttonTapped()
-
-                    // ONLY set the binding - @AppStorage automatically writes to UserDefaults
-                    isCompleted = true
-                    print("🎄 [ONBOARDING] isCompleted set to true - @AppStorage will handle UserDefaults")
+                    
+                    // Create user document in Firestore before completing onboarding
+                    Task {
+                        let firebase = FirebaseManager.shared
+                        do {
+                            // Use phone number as display name for now (or we can prompt for name later)
+                            let displayName = "User" // Default name - can be updated later
+                            try await firebase.createOrUpdateUser(displayName: displayName)
+                            print("✅ [ONBOARDING] User document created in Firestore")
+                            
+                            // Set completed after user document is created
+                            await MainActor.run {
+                                isCompleted = true
+                                print("🎄 [ONBOARDING] isCompleted set to true - @AppStorage will handle UserDefaults")
+                            }
+                        } catch {
+                            print("❌ [ONBOARDING] Failed to create user document: \(error)")
+                            // Still complete onboarding even if document creation fails
+                            await MainActor.run {
+                                isCompleted = true
+                            }
+                        }
+                    }
                 } label: {
                     VStack(spacing: Spacing.xs) {
                         Text("Get Started")
@@ -553,6 +563,12 @@ struct OnboardingView: View {
             .padding(.leading, Spacing.lg)
         }
         .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+    }
+
+    private func initializeCurrentUser() {
+        // Firebase will handle user initialization during phone auth
+        // This function is no longer needed but kept for compatibility
+        print("✅ [ONBOARDING] User initialization handled by Firebase Auth")
     }
 
     private func requestContactsAccess() {
@@ -626,11 +642,7 @@ struct OnboardingView: View {
         // Get primary phone/email for display/saving
         let phoneNumber = contact.phoneNumbers.first?.value.stringValue
         let email = contact.emailAddresses.first?.value as String?
-        
-        // Get ALL phones and emails for discovery
-        let phoneNumbers = contact.phoneNumbers.map { $0.value.stringValue }
-        let emails = contact.emailAddresses.map { $0.value as String }
-        
+
         let name = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
 
         HapticManager.itemAdded()
@@ -641,29 +653,17 @@ struct OnboardingView: View {
             imageData = contact.imageData
         }
 
-        // Try to discover if friend has the app (tries all phones and emails)
-        var friendUserRecordID: String?
-        do {
-            if let recordID = try await cloudKit.discoverUser(phoneNumbers: phoneNumbers, emails: emails) {
-                friendUserRecordID = recordID.recordName
-                print("✅ Discovered friend has app! Record ID: \(recordID.recordName)")
-            } else {
-                print("ℹ️ Friend hasn't installed the app yet")
-            }
-        } catch {
-            print("⚠️ Error discovering user: \(error)")
-        }
-
         // Save friend to SwiftData (Local Storage)
+        // Firebase discovery will be implemented later
         let newFriend = Friend(
             name: name,
             phoneNumber: phoneNumber,
             email: email,
-            hasApp: friendUserRecordID != nil,
-            friendUserRecordID: friendUserRecordID,
+            hasApp: false, // Will be discovered via Firebase later
+            friendUserRecordID: nil,
             imageData: imageData
         )
-        
+
         await MainActor.run {
             modelContext.insert(newFriend)
             try? modelContext.save()
@@ -682,38 +682,13 @@ struct OnboardingView: View {
 
         Task {
             for (index, contact) in selectedContacts.enumerated() {
-                let contactName = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
-                
-                do {
-                    await addFriend(from: contact)
-                } catch let ckError as CKError where ckError.code == .quotaExceeded {
-                    // CloudKit quota exceeded - show error and stop processing
-                    print("❌ CloudKit quota exceeded while adding friend")
-                    await MainActor.run {
-                        errorMessage = ckError.userFriendlyMessage
-                        showingError = true
-                        isProcessing = false
-                    }
-                    break // Stop processing remaining contacts
-                } catch {
-                    // Other error - log and continue with next contact
-                    print("❌ Failed to add friend \(contactName): \(error)")
-                    await MainActor.run {
-                        failedFriends.append(contactName)
-                    }
-                }
+                await addFriend(from: contact)
 
                 // Update progress
                 await MainActor.run {
                     processingProgress = Double(index + 1) / Double(selectedContacts.count)
                 }
             }
-
-            // Delay for CloudKit consistency and trigger refresh in FriendsListView
-            try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
-
-            // Notify FriendsListView to refresh when user navigates to it
-            CloudKitManager.shared.shouldRefreshFriends.toggle()
 
             HapticManager.itemAdded()
             await MainActor.run {
@@ -735,23 +710,26 @@ struct OnboardingView: View {
         processingProgress = 0
 
         Task {
+            let firebase = FirebaseManager.shared
+
             for (index, name) in childrenToAdd.enumerated() {
                 do {
-                    let record = try await cloudKit.saveChild(name: name)
-                    
+                    // Save to Firebase (or skip if not authenticated)
+                    let childId = try await firebase.saveChild(name: name)
+
                     // Save to SwiftData
                     await MainActor.run {
                         let newChild = Child(
-                            id: UUID(uuidString: record.recordID.recordName) ?? UUID(),
                             name: name,
-                            parentId: currentUserId,
-                            createdAt: record.creationDate ?? Date()
+                            parentId: UUID(),
+                            cloudKitRecordID: childId
                         )
                         modelContext.insert(newChild)
                         try? modelContext.save()
                     }
                 } catch {
-                    print("Failed to add child \(name): \(error)")
+                    print("⚠️ [ONBOARDING] Failed to add child \(name): \(error)")
+                    // Continue with next child even if one fails
                 }
 
                 // Update progress

@@ -56,7 +56,7 @@ The app uses a **local-first architecture** where the user's phone is the ultima
 - Sync happens silently in the background without blocking the UI
 - Phone numbers are the source of truth for user identity
 
-**Current State**: Cloud sync is NOT yet implemented. All data is currently local-only.
+**Current State**: Migrating from CloudKit to Firebase. Firebase implementation in progress (December 2024).
 
 ## Quick Reference
 
@@ -118,16 +118,48 @@ xcodebuild test -project ChristmasWishlist.xcodeproj -scheme ChristmasWishlist -
 
 ### Data Layer
 - **SwiftData** for local persistence (source of truth)
-- Models: `WishlistItem`, `Friend`, `User`
-- **Architecture**: Local-first with cloud sync
+- **Firebase** for cloud sync and multi-user sharing
+- Models: `WishlistItem`, `Friend`, `User`, `Child`
+- **Architecture**: Local-first with Firebase sync
   - User's phone is always the source of truth
-  - When adding items: Save locally first, then push to cloud
+  - When adding items: Save locally first, then push to Firebase
   - When viewing wishlists: Display local data immediately, sync in background
-  - Other users pull from cloud to see wishlists
+  - Other users pull from Firebase to see wishlists
   - Same pattern for both user items and child account items
 - **Performance**: Zero-delay UI - always show local data first, update silently from cloud
-- **Current State**: Cloud sync NOT implemented yet (local-only)
-- **Future**: Implement CloudKit or Firebase for multi-user sync
+- **Firebase Services**:
+  - **Firestore**: NoSQL database for wishlist items, children, friends, purchases
+  - **Firebase Auth**: Phone number authentication (SMS verification)
+  - **Firebase Storage**: Image uploads for wishlist items
+  - **Cloud Functions**: Push notifications via Firebase Cloud Messaging (FCM)
+- **Current State**: Migrating from CloudKit to Firebase (December 2024)
+
+### Firebase Architecture
+
+**Firestore Collections:**
+```
+users/{phoneNumber}          - User accounts and settings
+wishlistItems/{itemId}       - All wishlist items
+children/{childId}           - Child accounts
+purchases/{purchaseId}       - Purchase tracking
+friends/{friendshipId}       - Friend relationships
+```
+
+**Phone Number Normalization:**
+- Strip all formatting: `(205)-292-9663` → `2052929663`
+- Use normalized phone as Firestore document ID
+- For Firebase Auth, use E.164 format: `+12052929663`
+
+**Firebase Managers:**
+- `FirebaseManager.swift` - Main coordinator (replaces CloudKitManager)
+- `FirebaseAuthManager.swift` - Phone authentication handling
+- `FirebaseStorageManager.swift` - Image upload/download
+- `FirebaseModels.swift` - Helper structs for Firestore data
+
+**Security Rules:**
+- Authenticated users can read most data
+- Only owners can modify their own data
+- Phone number verification via Firebase Auth
 
 ### Design System
 - **Colors**: Cream backgrounds (#FAF7F2), gold accents (#D4AF37), forest green (#2D5016)
@@ -237,6 +269,58 @@ Use `HapticManager` methods:
 ### Info.plist Required Entries
 **NSContactsUsageDescription**: "We need access to your contacts to help you add friends to your wishlist"
 
+### Firebase Development Tasks
+
+**Setup Firebase:**
+1. Add `GoogleService-Info.plist` to Xcode project
+2. Add Firebase SDK via Swift Package Manager
+3. Initialize Firebase in `ChristmasWishlistApp.swift`:
+```swift
+import FirebaseCore
+FirebaseApp.configure()
+```
+
+**Common Firebase Operations:**
+```swift
+// Save item to Firestore
+let db = Firestore.firestore()
+try await db.collection("wishlistItems").document(itemId).setData([...])
+
+// Fetch items from Firestore
+let snapshot = try await db.collection("wishlistItems")
+    .whereField("ownerPhone", isEqualTo: normalizedPhone)
+    .getDocuments()
+
+// Upload image to Storage
+let storageRef = Storage.storage().reference()
+let imageRef = storageRef.child("images/\(itemId).jpg")
+try await imageRef.putDataAsync(imageData)
+```
+
+**Phone Auth Flow:**
+```swift
+// Send SMS code
+PhoneAuthProvider.provider().verifyPhoneNumber("+12052929663") { verificationID, error in
+    // Store verificationID
+}
+
+// Verify code
+let credential = PhoneAuthProvider.provider().credential(
+    withVerificationID: verificationID,
+    verificationCode: code
+)
+try await Auth.auth().signIn(with: credential)
+```
+
+**Testing with Firebase Emulators:**
+```bash
+# Install Firebase CLI
+npm install -g firebase-tools
+
+# Start emulators locally
+firebase emulators:start --only firestore,auth,storage,functions
+```
+
 ### Git Workflow
 ```bash
 # Current branch: liveBranch (main development branch)
@@ -315,12 +399,12 @@ Logger.friends.error("Failed to load contacts: \(error)")
 ### Data Sync Architecture
 **Critical Understanding**: The app is designed with local-first architecture where the user's phone is the ultimate source of truth.
 
-**Intended Sync Flow** (not yet implemented):
+**Intended Sync Flow** (Firebase implementation in progress):
 
 **Adding Items:**
 1. User adds wishlist item → Save to local SwiftData FIRST
-2. After local save succeeds → Push to cloud (CloudKit/Firebase)
-3. Other users can pull from cloud to see the wishlist
+2. After local save succeeds → Push to Firebase Firestore
+3. Other users can pull from Firestore to see the wishlist
 4. Child account items follow same pattern
 
 **Marking Items Purchased:**
@@ -347,11 +431,14 @@ Logger.friends.error("Failed to load contacts: \(error)")
 4. All three formats above must return John's wishlist data
 
 **Current State**:
-- Cloud sync is NOT implemented
-- All data is local-only using SwiftData
-- No multi-user visibility yet
+- Migrating from CloudKit to Firebase (December 2024)
+- Firebase Firestore for multi-user data sharing
+- Firebase Auth for phone number authentication
+- Firebase Storage for images
+- Firebase Cloud Messaging for push notifications
+- Maintaining local-first SwiftData architecture
 
-**Important**: When implementing sync, never make cloud the source of truth. Always save locally first, then sync to cloud as a secondary operation. This ensures the app works offline and the user never loses data even if cloud sync fails.
+**Important**: Firebase sync follows local-first principle. Always save locally first, then sync to Firestore as a secondary operation. This ensures the app works offline and the user never loses data even if cloud sync fails.
 
 **Critical UX Requirement**: The app must feel instant. When opening any wishlist view:
 - Display local data immediately (zero delay)
@@ -375,27 +462,39 @@ When making significant changes, add entry here:
 
 ---
 
-### Example Entry (Delete this after first real entry)
-
-**2024-12-05 - Added Purchase Tracking**
-- **What Changed**: Users can now mark items as purchased
-- **Files Modified**: `WishlistItem.swift`, `FriendWishlistView.swift`
-- **Breaking Changes**: None
-- **Testing Done**: Tested marking items purchased, verified UI updates
-- **Rollback Steps**: Revert commits 44e30cd and 15e1695
-- **Known Issues**: Doesn't show who purchased the item
+**2024-12-10 - Firebase Migration Started**
+- **What Changed**: Migrating from CloudKit to Firebase for cloud sync
+- **Why**: CloudKit issues, need more reliable backend with better notification support
+- **New Services**:
+  - Firebase Auth (phone number authentication)
+  - Firestore (NoSQL database)
+  - Firebase Storage (image uploads)
+  - Firebase Cloud Messaging (push notifications)
+- **Files Being Created**:
+  - `Firebase/FirebaseManager.swift` - Main coordinator
+  - `Firebase/FirebaseAuthManager.swift` - Phone auth
+  - `Firebase/FirebaseStorageManager.swift` - Image handling
+  - `Firebase/FirebaseModels.swift` - Helper structs
+  - `Views/Auth/PhoneAuthView.swift` - Phone entry UI
+  - `Views/Auth/SMSVerificationView.swift` - Code verification UI
+- **Files Being Deleted**: All CloudKit files (CloudKitManager, CloudKitDebugHelper, etc.)
+- **Architecture**: Maintaining local-first SwiftData, Firebase for sync
+- **Timeline**: ~3-4 weeks implementation
+- **Testing Strategy**: Firebase Emulators for local testing
+- **Rollback Steps**: Keep CloudKit code in git history until Firebase proven stable
 
 ---
 
 ## Future Enhancements
 
 ### Planned Features
-- [ ] Backend sync (CloudKit or Firebase)
-- [ ] Push notifications for wishlist updates
-- [ ] Image uploads for wishlist items
+- [x] Backend sync with Firebase (IN PROGRESS - December 2024)
+- [x] Push notifications via Firebase Cloud Messaging (IN PROGRESS)
+- [x] Image uploads via Firebase Storage (IN PROGRESS)
 - [ ] Price tracking and budget management
 - [ ] Sharing wishlists via link
 - [ ] Multi-language support
+- [ ] Real-time updates via Firestore listeners
 
 ### Technical Debt
 - [ ] Add comprehensive unit tests
@@ -429,3 +528,7 @@ open -a Simulator
 - [SwiftData Documentation](https://developer.apple.com/documentation/swiftdata)
 - [iOS 26 Release Notes](https://developer.apple.com/documentation/ios-release-notes)
 - [Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines/)
+- [Firebase iOS Documentation](https://firebase.google.com/docs/ios/setup)
+- [Firestore Documentation](https://firebase.google.com/docs/firestore)
+- [Firebase Auth Documentation](https://firebase.google.com/docs/auth/ios/phone-auth)
+- [Firebase Cloud Messaging](https://firebase.google.com/docs/cloud-messaging/ios/client)

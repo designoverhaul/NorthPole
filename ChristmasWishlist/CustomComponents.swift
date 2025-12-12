@@ -58,27 +58,59 @@ struct ContactPickerView: UIViewControllerRepresentable {
 // MARK: - Wishlist Item Photo
 struct WishlistItemPhoto: View {
     let imageData: Data?
-    let showCheckmark: Bool
+    let isPurchased: Bool
     let randomRotation: Double
+    let giftImageName: String
 
-    init(imageData: Data?, showCheckmark: Bool = false) {
+    init(imageData: Data?, isPurchased: Bool = false, itemId: String? = nil, giftIndex: Int? = nil) {
         self.imageData = imageData
-        self.showCheckmark = showCheckmark
+        self.isPurchased = isPurchased
 
         // Generate random rotation between -5 and 5 degrees
-        // Use imageData hash for consistent rotation per image
+        // Use imageData hash for consistent rotation per image, or itemId if no image
+        let hashValue: Int
         if let data = imageData {
-            let hash = data.hashValue
-            self.randomRotation = Double((hash % 11) - 5) // Range: -5 to 5
+            hashValue = data.hashValue
+        } else if let itemId = itemId {
+            // Use itemId hash for rotation if no image data
+            hashValue = itemId.hashValue
         } else {
-            self.randomRotation = 0
+            hashValue = 0
         }
+        self.randomRotation = Double((hashValue % 11) - 5) // Range: -5 to 5
+        
+        // Select gift image (1-4) - cycle through in order if giftIndex provided, otherwise use hash
+        let selectedGiftIndex: Int
+        if let giftIndex = giftIndex {
+            // Cycle through gifts 1-4 based on position among purchased items
+            selectedGiftIndex = (giftIndex % 4) + 1 // 1, 2, 3, or 4
+        } else {
+            // Fallback: use hash if giftIndex not provided
+            let giftHash: Int
+            if let itemId = itemId {
+                giftHash = itemId.hashValue
+            } else if let data = imageData {
+                giftHash = data.hashValue
+            } else {
+                giftHash = 0
+            }
+            selectedGiftIndex = abs(giftHash % 4) + 1 // 1, 2, 3, or 4
+        }
+        self.giftImageName = "gift\(selectedGiftIndex)"
     }
 
     var body: some View {
         ZStack(alignment: .center) {
-            if let imageData = imageData,
+            if isPurchased {
+                // Show wrapped gift image when purchased
+                Image(giftImageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 76)
+                    .rotationEffect(.degrees(randomRotation))
+            } else if let imageData = imageData,
                let uiImage = UIImage(data: imageData) {
+                // Show original image when not purchased
                 Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
@@ -95,19 +127,6 @@ struct WishlistItemPhoto: View {
                             y: 3
                         )
                         .rotationEffect(.degrees(randomRotation))
-            }
-
-            if showCheckmark && imageData != nil {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundColor(.successGreen)
-                    .background(
-                        Circle()
-                            .fill(Color.white)
-                            .frame(width: 24, height: 24)
-                    )
-                    .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
-                    .zIndex(1)
             }
         }
         .frame(height: 84) // Extra space for rotation and border, variable width
@@ -229,15 +248,48 @@ struct WishlistItemRow: View {
     let showPurchaseButton: Bool
     let onDelete: (() -> Void)?
     let onTogglePurchase: (() -> Void)?
+    let giftIndex: Int? // Index among purchased items (0-based) for cycling through gifts
+    let showSparkle: Bool
+    let onSparkleComplete: () -> Void
+    
+    init(
+        item: WishlistItem,
+        showPurchaseButton: Bool,
+        onDelete: (() -> Void)? = nil,
+        onTogglePurchase: (() -> Void)? = nil,
+        giftIndex: Int? = nil,
+        showSparkle: Bool = false,
+        onSparkleComplete: @escaping () -> Void = {}
+    ) {
+        self.item = item
+        self.showPurchaseButton = showPurchaseButton
+        self.onDelete = onDelete
+        self.onTogglePurchase = onTogglePurchase
+        self.giftIndex = giftIndex
+        self.showSparkle = showSparkle
+        self.onSparkleComplete = onSparkleComplete
+    }
 
     var body: some View {
         HStack(spacing: Spacing.md) {
             // Photo on the left (or spacer to maintain alignment)
-            if item.imageData != nil {
-                WishlistItemPhoto(
-                    imageData: item.imageData,
-                    showCheckmark: item.isPurchased && !showPurchaseButton
-                )
+            if item.imageData != nil || (item.isPurchased && !showPurchaseButton) {
+                ZStack(alignment: .center) {
+                    WishlistItemPhoto(
+                        imageData: item.imageData,
+                        isPurchased: item.isPurchased && !showPurchaseButton,
+                        itemId: item.id.uuidString,
+                        giftIndex: giftIndex
+                    )
+                    
+                    // Sparkle overlay on the gift image
+                    if showSparkle {
+                        SuccessSparkle {
+                            onSparkleComplete()
+                        }
+                        .allowsHitTesting(false)
+                    }
+                }
             } else {
                 // Reserve space to keep text aligned
                 Color.clear
@@ -379,7 +431,7 @@ struct FriendRow: View {
 // MARK: - Child Row
 
 struct ChildRow: View {
-    let child: CKChild
+    let child: Child
     let itemCount: Int?
 
     var body: some View {

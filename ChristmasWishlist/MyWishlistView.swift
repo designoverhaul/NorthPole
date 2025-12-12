@@ -7,28 +7,18 @@
 
 import SwiftUI
 import SwiftData
-import CloudKit
 
 struct MyWishlistView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \WishlistItem.createdAt, order: .reverse) private var items: [WishlistItem]
-    @State private var children: [CKChild] = []
-    @ObservedObject private var cloudKit = CloudKitManager.shared
+    @Query(sort: \Child.name) private var children: [Child]
+    @ObservedObject private var firebase = FirebaseManager.shared
 
     @State private var showingAddGift = false
     @State private var itemToEdit: WishlistItem?
-    @State private var currentUserId: UUID = {
-        // Try to load existing user ID, or create new one
-        if let existingId = AppGroupContainer.getCurrentUserId() {
-            return existingId
-        } else {
-            let newId = UUID()
-            AppGroupContainer.saveCurrentUserId(newId)
-            return newId
-        }
-    }()
-    @State private var selectedProfileId: UUID?
-    @State private var showSuccessSparkle = false
+    @State private var selectedChild: Child? = nil // Selected child for viewing their wishlist
+    @State private var purchasedItemIdForSparkle: UUID? = nil
+    @State private var showFallingSnow: Bool = false
 
     // Share wishlist state
     @State private var shareItems: [Any] = []
@@ -37,18 +27,19 @@ struct MyWishlistView: View {
     @State private var errorMessage: String?
 
     var myItems: [WishlistItem] {
-        let targetId = selectedProfileId ?? currentUserId
-        let filtered = items.filter { $0.ownerId == targetId }
-        return filtered
+        if let selectedChild = selectedChild {
+            // Show items for selected child
+            return items.filter { $0.ownerId == selectedChild.id }
+        } else {
+            // Show user's own items (items not belonging to any child)
+            let childIds = children.map { $0.id }
+            return items.filter { !childIds.contains($0.ownerId) }
+        }
     }
 
     var titleText: String {
-        if let selectedId = selectedProfileId, selectedId != currentUserId {
-            // selectedProfileId is a UUID, but CKChild.id is a CloudKit record ID string
-            // Try to match by converting
-            if let child = children.first(where: { UUID(uuidString: $0.id) == selectedId }) {
-                return "\(child.name)'s Wishlist"
-            }
+        if let child = selectedChild {
+            return "\(child.name)'s Wishlist"
         }
         return "My Wishlist"
     }
@@ -67,14 +58,21 @@ struct MyWishlistView: View {
                     }
                 }
                 .sheet(isPresented: $showingAddGift) {
-                    AddGiftView(userId: selectedProfileId ?? currentUserId, onItemAdded: {
-                        showSuccessSparkle = true
-                    })
+                    AddGiftView(
+                        userId: selectedChild?.id ?? UUID(), // Will be ignored, AddGiftView determines owner
+                        onItemAdded: {
+                            // Sparkle will show when item is purchased, not when added
+                        }
+                    )
                 }
                 .sheet(item: $itemToEdit) { item in
-                    AddGiftView(userId: selectedProfileId ?? currentUserId, onItemAdded: {
-                        showSuccessSparkle = true
-                    }, itemToEdit: item)
+                    AddGiftView(
+                        userId: selectedChild?.id ?? UUID(),
+                        onItemAdded: {
+                            // Sparkle will show when item is purchased, not when added
+                        },
+                        itemToEdit: item
+                    )
                 }
                 .sheet(isPresented: $showingShareSheet) {
                     ShareSheet(activityItems: shareItems)
@@ -88,28 +86,23 @@ struct MyWishlistView: View {
                 }
         }
         .task {
-            // Load children from CloudKit
+            // Load children from Firebase (returns local immediately, syncs in background)
             await loadChildren()
         }
-        .onChange(of: cloudKit.shouldRefreshChildren) { _, _ in
+        .onChange(of: firebase.shouldRefreshChildren) { _, _ in
             Task {
                 await loadChildren()
             }
         }
-        .onChange(of: cloudKit.isSignedInToiCloud) { _, newValue in
-            if newValue {
+        .onChange(of: firebase.isAuthenticated) { _, isAuth in
+            if isAuth {
                 Task {
                     await loadChildren()
                 }
             }
         }
         .onAppear {
-            // Ensure selection is valid
-            if selectedProfileId == nil {
-                selectedProfileId = currentUserId
-            }
-            
-            // Load children on appear as well (in case task hasn't run yet)
+            // Load children and items from Firebase
             Task {
                 await loadChildren()
             }
@@ -152,14 +145,14 @@ struct MyWishlistView: View {
             }
 
             floatingActionButton
-
-            // Success sparkle overlay
-            if showSuccessSparkle {
-                SuccessSparkle {
-                    showSuccessSparkle = false
-                }
-                .allowsHitTesting(false)
-            }
+            
+            // Falling snow overlay - covers entire screen including header
+            // Temporarily hidden
+            // if showFallingSnow {
+            //     FallingSnowEffect(snowflakeCount: Int.random(in: 15...25))
+            //         .allowsHitTesting(false)
+            //         .transition(.opacity)
+            // }
         }
     }
 
@@ -169,10 +162,10 @@ struct MyWishlistView: View {
                 // "Me" pill
                 ProfilePill(
                     name: "Me",
-                    isSelected: selectedProfileId == nil || selectedProfileId == currentUserId,
+                    isSelected: selectedChild == nil,
                     action: {
                         HapticManager.buttonTapped()
-                        selectedProfileId = currentUserId
+                        selectedChild = nil
                     }
                 )
 
@@ -180,10 +173,10 @@ struct MyWishlistView: View {
                 ForEach(children) { child in
                     ProfilePill(
                         name: child.name,
-                        isSelected: selectedProfileId == UUID(uuidString: child.id),
+                        isSelected: selectedChild?.id == child.id,
                         action: {
                             HapticManager.buttonTapped()
-                            selectedProfileId = UUID(uuidString: child.id)
+                            selectedChild = child
                         }
                     )
                 }
@@ -198,19 +191,34 @@ struct MyWishlistView: View {
     private var itemsList: some View {
         ScrollView {
             LazyVStack(spacing: 2) {
-                ForEach(myItems) { item in
-                    WishlistItemRow(
-                        item: item,
-                        showPurchaseButton: false,
-                        onDelete: {
-                            deleteItem(item)
-                        },
-                        onTogglePurchase: nil
-                    )
-                    .onTapGesture {
-                        HapticManager.buttonTapped()
-                        itemToEdit = item
+                ForEach(Array(myItems.enumerated()), id: \.element.id) { index, item in
+                    NavigationLink {
+                        MyItemDetailView(
+                            item: item,
+                            onEdit: {
+                                itemToEdit = item
+                            },
+                            onDelete: {
+                                deleteItem(item)
+                            },
+                            onTogglePurchase: {
+                                togglePurchase(item)
+                            }
+                        )
+                    } label: {
+                        WishlistItemRow(
+                            item: item,
+                            showPurchaseButton: false,
+                            onDelete: nil,
+                            onTogglePurchase: nil,
+                            giftIndex: computeGiftIndex(for: item, in: myItems),
+                            showSparkle: purchasedItemIdForSparkle == item.id,
+                            onSparkleComplete: {
+                                purchasedItemIdForSparkle = nil
+                            }
+                        )
                     }
+                    .buttonStyle(PlainButtonStyle())
                     .transition(.asymmetric(
                         insertion: .scale.combined(with: .opacity),
                         removal: .scale.combined(with: .opacity)
@@ -220,6 +228,27 @@ struct MyWishlistView: View {
             .padding(Spacing.md)
             .padding(.bottom, 80) // Space for FAB
         }
+        .refreshable {
+            print("🔄 [PULL-TO-REFRESH] User pulled to refresh")
+            HapticManager.buttonTapped()
+            await downloadAllItemsFromFirebase()
+        }
+    }
+    
+    // Compute gift index for an item based on its position among purchased items
+    private func computeGiftIndex(for item: WishlistItem, in allItems: [WishlistItem]) -> Int? {
+        guard item.isPurchased else { return nil } // Not purchased
+        
+        // Find all purchased items and sort them by creation date (or ID for consistency)
+        let purchasedItems = allItems
+            .filter { $0.isPurchased }
+            .sorted { $0.createdAt < $1.createdAt } // Sort by creation date
+        
+        // Find this item's index in the sorted purchased items list
+        if let index = purchasedItems.firstIndex(where: { $0.id == item.id }) {
+            return index
+        }
+        return nil
     }
 
     private var floatingActionButton: some View {
@@ -269,141 +298,112 @@ struct MyWishlistView: View {
     }
 
     private var emptyStateView: some View {
-        VStack(spacing: Spacing.lg) {
-            Spacer()
+        ScrollView {
+            VStack(spacing: Spacing.lg) {
+                Spacer()
 
-            Image(systemName: "gift")
-                .font(.system(size: 72))
-                .foregroundColor(.warmGrayLight)
+                Image(systemName: "gift")
+                    .font(.system(size: 72))
+                    .foregroundColor(.warmGrayLight)
 
-            Text("No items yet")
-                .font(.headingMedium)
-                .foregroundColor(.warmGray)
+                Text("No items yet")
+                    .font(.headingMedium)
+                    .foregroundColor(.warmGray)
 
-            Text("Tap the + button to add items\nto your wishlist")
-                .font(.bodyMedium)
-                .foregroundColor(.warmGray)
-                .multilineTextAlignment(.center)
+                Text("Tap the + button to add items\nto your wishlist")
+                    .font(.bodyMedium)
+                    .foregroundColor(.warmGray)
+                    .multilineTextAlignment(.center)
 
-            Spacer()
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .refreshable {
+            print("🔄 [PULL-TO-REFRESH] User pulled to refresh (empty state)")
+            HapticManager.buttonTapped()
+            await downloadAllItemsFromFirebase()
         }
     }
 
     private func deleteItem(_ item: WishlistItem) {
+        // Optimistically delete from UI
         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
             HapticManager.itemDeleted()
             modelContext.delete(item)
+            try? modelContext.save()
         }
-    }
-
-    // Sync from CloudKit
-    private func syncFromCloudKit() {
-        print("⚡ [MANUAL SYNC] User triggered manual sync from CloudKit")
-        HapticManager.buttonTapped()
-
+        
+        // Delete from Firebase
         Task {
-            await downloadAllItemsFromCloudKit()
+            await deleteItemFromFirebase(item)
         }
     }
 
     @MainActor
-    private func downloadAllItemsFromCloudKit() async {
-        print("📥 [MANUAL SYNC] Downloading all items from CloudKit...")
+    private func deleteItemFromFirebase(_ item: WishlistItem) async {
+        guard firebase.isAuthenticated else {
+            print("⚠️ [DELETE] Not authenticated, skipping Firebase deletion")
+            return
+        }
 
-        guard cloudKit.isSignedInToiCloud else {
-            print("⚠️ [MANUAL SYNC] Not signed in to iCloud")
-            errorMessage = "Please sign in to iCloud to sync your wishlist"
+        print("🗑️ [DELETE] Deleting item '\(item.name)' from Firebase...")
+
+        do {
+            try await firebase.deleteWishlistItem(id: item.id)
+            print("✅ [DELETE] Successfully deleted from Firebase")
+        } catch {
+            print("❌ [DELETE] Failed to delete from Firebase: \(error.localizedDescription)")
+        }
+    }
+    
+    private func togglePurchase(_ item: WishlistItem) {
+        withAnimation {
+            HapticManager.buttonTapped()
+            item.isPurchased.toggle()
+            try? modelContext.save()
+            
+            if item.isPurchased {
+                HapticManager.itemMarkedPurchased()
+                purchasedItemIdForSparkle = item.id
+                
+                // Trigger snow effect - temporarily disabled
+                // showFallingSnow = false // Reset first
+                // DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                //     showFallingSnow = true
+                //     
+                //     // Hide snow after animation completes (shorter for quick fall)
+                //     DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
+                //         showFallingSnow = false
+                //     }
+                // }
+            } else {
+                HapticManager.impact(.medium)
+            }
+        }
+    }
+
+    @MainActor
+    private func downloadAllItemsFromFirebase() async {
+        print("📥 [FIREBASE SYNC] Starting sync from Firebase")
+
+        guard firebase.isAuthenticated else {
+            print("⚠️ [FIREBASE] Not authenticated")
+            errorMessage = "Please sign in to continue"
             showingError = true
             return
         }
 
         do {
-            // Fetch MY items from CloudKit
-            let myRecords = try await cloudKit.fetchMyWishlistItems()
-            print("📥 [MANUAL SYNC] Fetched \(myRecords.count) items from CloudKit")
+            // Fetch items and children from Firebase (returns local immediately, syncs in background)
+            _ = try await firebase.fetchMyWishlistItems(context: modelContext)
+            _ = try await firebase.fetchMyChildren(context: modelContext)
 
-            // Fetch children from CloudKit
-            let childRecords = try await cloudKit.fetchMyChildren()
-            print("📥 [MANUAL SYNC] Fetched \(childRecords.count) children from CloudKit")
-
-            // Create/update children in SwiftData
-            for childRecord in childRecords {
-                let childName = childRecord["name"] as? String ?? "Unknown"
-                let cloudKitRecordID = childRecord.recordID.recordName
-
-                // Check if child already exists
-                let childDescriptor = FetchDescriptor<Child>(
-                    predicate: #Predicate { $0.cloudKitRecordID == cloudKitRecordID }
-                )
-                let existingChildren = try modelContext.fetch(childDescriptor)
-
-                if existingChildren.isEmpty {
-                    // Create new child
-                    let newChild = Child(
-                        name: childName,
-                        parentId: currentUserId,
-                        cloudKitRecordID: cloudKitRecordID
-                    )
-                    modelContext.insert(newChild)
-                    print("📥 [MANUAL SYNC] Created child '\(childName)'")
-                }
-            }
-
-            try modelContext.save()
-
-            // Re-fetch children to get IDs
-            let updatedChildDescriptor = FetchDescriptor<Child>()
-            let allChildren = try modelContext.fetch(updatedChildDescriptor)
-
-            // Create/update items in SwiftData
-            for record in myRecords {
-                let itemName = record["name"] as? String ?? "Unknown"
-                let itemURL = record["url"] as? String
-                let itemDescription = record["itemDescription"] as? String
-                let ownerRef = record["ownerID"] as? CKRecord.Reference
-                let ownerRecordID = ownerRef?.recordID.recordName
-
-                // Determine local owner (user or child)
-                var localOwnerID = currentUserId // Default to current user
-
-                // If this item has an owner that's NOT the current user, it must be a child
-                if let ownerRecordID = ownerRecordID,
-                   ownerRecordID != cloudKit.currentUserRecordID?.recordName {
-                    // Find the child with this CloudKit record ID
-                    if let child = allChildren.first(where: { $0.cloudKitRecordID == ownerRecordID }) {
-                        localOwnerID = child.id
-                        print("📥 [MANUAL SYNC] Item '\(itemName)' belongs to child '\(child.name)'")
-                    }
-                }
-
-                // Check if item already exists by name (simple deduplication)
-                let itemDescriptor = FetchDescriptor<WishlistItem>(
-                    predicate: #Predicate { $0.name == itemName && $0.ownerId == localOwnerID }
-                )
-                let existingItems = try modelContext.fetch(itemDescriptor)
-
-                if existingItems.isEmpty {
-                    // Create new item
-                    let newItem = WishlistItem(
-                        name: itemName,
-                        url: itemURL,
-                        itemDescription: itemDescription,
-                        ownerId: localOwnerID
-                    )
-                    modelContext.insert(newItem)
-                    print("📥 [MANUAL SYNC] Created item '\(itemName)' for owner \(localOwnerID)")
-                }
-            }
-
-            try modelContext.save()
-            print("✅ [MANUAL SYNC] Synced \(myRecords.count) items from CloudKit")
-
-            HapticManager.notification(.success)
+            print("✅ [FIREBASE SYNC] Sync completed successfully")
         } catch {
-            print("❌ [MANUAL SYNC] Failed: \(error)")
-            errorMessage = "Sync failed: \(error.localizedDescription)"
+            print("❌ [FIREBASE SYNC] Failed: \(error.localizedDescription)")
+            errorMessage = "Failed to sync: \(error.localizedDescription)"
             showingError = true
-            HapticManager.errorOccurred()
         }
     }
 
@@ -434,10 +434,7 @@ struct MyWishlistView: View {
         }
         
         // Add app promotion
-        shareText += "━━━━━━━━━━━━━━━━━━━━\n\n"
         shareText += "🎄 Create your own wishlist!\n"
-        shareText += "Download North Pole Wishlist app\n"
-        shareText += "https://apps.apple.com/us/app/north-pole-christmas-lists/id6755366177\n"
         
         // Prepare share items
         shareItems = [shareText]
@@ -445,16 +442,204 @@ struct MyWishlistView: View {
     }
     
     private func loadChildren() async {
-        guard cloudKit.isSignedInToiCloud else { return }
-        
+        guard firebase.isAuthenticated else {
+            print("⚠️ [MYWISHLIST] Not authenticated with Firebase")
+            return
+        }
+
         do {
-            let records = try await cloudKit.fetchMyChildren()
-            await MainActor.run {
-                children = records.map { CKChild(from: $0) }
-                print("✅ [MYWISHLIST] Loaded \(children.count) children from CloudKit")
-            }
+            // Fetch children from Firebase (returns local immediately, syncs in background)
+            _ = try await firebase.fetchMyChildren(context: modelContext)
+            print("✅ [MYWISHLIST] Loaded children from Firebase")
         } catch {
-            print("❌ [MYWISHLIST] Error loading children: \(error)")
+            print("❌ [MYWISHLIST] Error loading children: \(error.localizedDescription)")
+        }
+    }
+}
+
+// MARK: - My Item Detail View
+
+struct MyItemDetailView: View {
+    @Bindable var item: WishlistItem
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    let onTogglePurchase: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("showPurchasedItems") private var showPurchasedItems = true
+    @State private var showingDeleteConfirmation = false
+
+    var body: some View {
+        ZStack {
+            Color.creamBackground
+                .ignoresSafeArea()
+
+            ScrollView {
+                VStack(spacing: Spacing.lg) {
+                    // Image if available
+                    if let imageData = item.imageData, let uiImage = UIImage(data: imageData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .frame(maxHeight: 300)
+                            .cornerRadius(CornerRadius.md)
+                            .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 4)
+                    }
+
+                    // Item name
+                    Text(item.name)
+                        .font(.custom("Caveat", size: 44))
+                        .foregroundColor(.warmBlack)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+
+                    // Purchase status badge
+                    if showPurchasedItems && item.isPurchased {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.successGreen)
+                            Text("Checked off")
+                                .font(.bodyMedium)
+                                .fontWeight(.medium)
+                                .foregroundColor(.successGreen)
+                        }
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.sm)
+                        .background(Color.successGreen.opacity(0.1))
+                        .cornerRadius(CornerRadius.sm)
+                    }
+
+                    // Description
+                    if let description = item.itemDescription, !description.isEmpty {
+                        Text(description)
+                            .font(.bodyMedium)
+                            .foregroundColor(.warmGray)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Spacing.md)
+                    }
+
+                    // Mark as Purchased button
+                    Button(action: {
+                        HapticManager.buttonTapped()
+                        onTogglePurchase()
+                    }) {
+                        if item.isPurchased {
+                            Text("Unpurchase")
+                                .font(.bodyLarge)
+                                .fontWeight(.medium)
+                                .foregroundColor(.warmGray)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, Spacing.lg)
+                                .padding(.vertical, Spacing.md)
+                                .background(Color.creamCard)
+                                .cornerRadius(CornerRadius.md)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CornerRadius.md)
+                                        .stroke(Color.warmGray, lineWidth: 1)
+                                )
+                        } else {
+                            HStack {
+                                Text("🎁")
+                                    .font(.system(size: 20))
+                                Text("Mark as Purchased")
+                            }
+                            .font(.bodyLarge)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, Spacing.lg)
+                            .padding(.vertical, Spacing.md)
+                            .background(Color.forestGreen)
+                            .cornerRadius(CornerRadius.md)
+                            .shadow(
+                                color: DesignShadow.medium,
+                                radius: 8,
+                                x: 0,
+                                y: 4
+                            )
+                        }
+                    }
+                    .padding(.top, Spacing.xs)
+
+                    // URL Link
+                    if let url = item.url, !url.isEmpty, let urlObj = URL(string: url) {
+                        Link(destination: urlObj) {
+                            HStack {
+                                Image(systemName: "link")
+                                Text("View Item")
+                            }
+                            .font(.bodyLarge)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, Spacing.lg)
+                            .padding(.vertical, Spacing.md)
+                            .background(Color.gold)
+                            .cornerRadius(CornerRadius.md)
+                            .shadow(
+                                color: Color.gold.opacity(0.3),
+                                radius: 8,
+                                x: 0,
+                                y: 4
+                            )
+                        }
+                        .padding(.top, Spacing.xs)
+                    }
+
+                    // Edit button
+                    Button(action: {
+                        HapticManager.buttonTapped()
+                        onEdit()
+                        dismiss()
+                    }) {
+                        HStack {
+                            Image(systemName: "pencil")
+                            Text("Edit")
+                        }
+                        .font(.bodyLarge)
+                        .fontWeight(.medium)
+                        .foregroundColor(.forestGreen)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Spacing.lg)
+                        .padding(.vertical, Spacing.md)
+                        .background(Color.creamCard)
+                        .cornerRadius(CornerRadius.md)
+                    }
+                    .padding(.top, Spacing.xs)
+
+                    // Delete button
+                    Button(action: {
+                        HapticManager.buttonTapped()
+                        showingDeleteConfirmation = true
+                    }) {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Delete")
+                        }
+                        .font(.bodyLarge)
+                        .fontWeight(.medium)
+                        .foregroundColor(.warmGray)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Spacing.lg)
+                        .padding(.vertical, Spacing.md)
+                        .background(Color.creamCard)
+                        .cornerRadius(CornerRadius.md)
+                    }
+                    .padding(.top, Spacing.xs)
+                }
+                .padding(Spacing.lg)
+            }
+        }
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Delete Item", isPresented: $showingDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                onDelete()
+                dismiss()
+            }
+        } message: {
+            Text("Are you sure you want to delete '\(item.name)'?")
         }
     }
 }

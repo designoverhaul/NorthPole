@@ -292,6 +292,17 @@ struct AddGiftView: View {
                     .foregroundColor(.warmGray)
                 }
             }
+            .task {
+                // Load children from Firebase
+                if firebase.isAuthenticated {
+                    await loadChildren()
+                }
+            }
+            .onChange(of: firebase.shouldRefreshChildren) { _, _ in
+                Task {
+                    await loadChildren()
+                }
+            }
             .onAppear {
                 focusedField = .name
                 checkClipboard()
@@ -359,37 +370,11 @@ struct AddGiftView: View {
         print("☁️ [SYNC] Syncing item '\(item.name)' to Firebase...")
 
         do {
-            // Determine if this belongs to a child by checking if item.ownerId matches any child's ID
-            // Fetch all children to check if item.ownerId matches any of them
-            let childrenDescriptor = FetchDescriptor<Child>()
-            let allChildren = (try? modelContext.fetch(childrenDescriptor)) ?? []
-            
-            // Check if item.ownerId matches any child's SwiftData UUID
-            let matchingChild = allChildren.first { $0.id == item.ownerId }
-            let isChild = matchingChild != nil
-            var childIdString: String? = nil
-            
-            if isChild, let child = matchingChild {
-                // This item belongs to a child - get the Firebase document ID
-                if let firebaseChildId = child.cloudKitRecordID, !firebaseChildId.isEmpty {
-                    childIdString = firebaseChildId
-                    print("✅ [SYNC] Item belongs to child '\(child.name)'")
-                    print("✅ [SYNC] Child SwiftData ID: \(child.id.uuidString), Firebase ID: \(firebaseChildId)")
-                    // Verify they're different (they should be - SwiftData UUID vs Firebase document ID)
-                    if child.id.uuidString == firebaseChildId {
-                        print("⚠️ [SYNC] WARNING: SwiftData UUID matches Firebase ID - this shouldn't happen!")
-                    }
-                } else {
-                    print("❌ [SYNC] ERROR: Child '\(child.name)' exists but has no Firebase ID! This item will be saved incorrectly.")
-                    print("❌ [SYNC] This should not happen - child should have been synced to Firebase first.")
-                    // Don't save without childId - it would appear in parent's list incorrectly
-                    throw NSError(domain: "AddGiftView", code: 1, userInfo: [NSLocalizedDescriptionKey: "Child account not properly synced to Firebase. Please try again."])
-                }
-            } else {
-                print("✅ [SYNC] Item belongs to user (not a child)")
-            }
+            // Determine if this belongs to a child (childId for Firebase)
+            let isChild = item.ownerId != userId
+            let childIdString = isChild ? item.ownerId.uuidString : nil
 
-            let savedItemId = try await firebase.saveWishlistItem(
+            _ = try await firebase.saveWishlistItem(
                 id: item.id,
                 name: item.name,
                 url: item.url,
@@ -401,13 +386,6 @@ struct AddGiftView: View {
                 context: modelContext
             )
             print("✅ [SYNC] Successfully synced to Firebase")
-            print("✅ [SYNC] Item ID: \(savedItemId)")
-            print("✅ [SYNC] ownerType: \(isChild ? "child" : "user"), childId: \(childIdString ?? "nil")")
-            if isChild {
-                print("✅ [SYNC] This item should appear in child's wishlist, not parent's")
-            } else {
-                print("✅ [SYNC] This item should appear in user's wishlist")
-            }
             isSyncingToCloud = false
         } catch {
             print("❌ [SYNC] Failed to sync to Firebase: \(error.localizedDescription)")
@@ -431,6 +409,173 @@ struct AddGiftView: View {
             }
 
             // Delete from local database
+            await MainActor.run {
+                modelContext.delete(item)
+                onItemAdded() // Trigger refresh
+                dismiss()
+            }
+        }
+    }
+
+    private func REMOVE_syncItemToCloudKit(item: WishlistItem, isNew: Bool) async {
+        guard cloudKit.isSignedInToiCloud else {
+            print("⚠️ [SYNC] Not signed in to iCloud, skipping sync")
+            isSyncingToCloud = false
+            return
+        }
+
+        print("☁️ [SYNC] \(isNew ? "Uploading new" : "Updating") item '\(item.name)' to CloudKit...")
+        print("☁️ [SYNC] Item ownerId (local UUID): \(item.ownerId)")
+
+        do {
+            // Determine the CloudKit owner record ID
+            var ownerRecordID: String? = nil
+
+            // Check if this item belongs to a child
+            // item.ownerId is a UUID (local SwiftData Child.id)
+            // We need to find the local Child, get its cloudKitRecordID, then match with CKChild
+            let ownerIdToFind = item.ownerId
+            let childDescriptor = FetchDescriptor<Child>(
+                predicate: #Predicate<Child> { child in
+                    child.id == ownerIdToFind
+                }
+            )
+            let localChildren = try modelContext.fetch(childDescriptor)
+            
+            if let localChild = localChildren.first {
+                // This item belongs to a child
+                print("☁️ [SYNC] Found local child: '\(localChild.name)' (local ID: \(localChild.id))")
+                
+                // Get the CloudKit record ID for this child
+                if let cloudKitRecordID = localChild.cloudKitRecordID {
+                    // Verify this child exists in CloudKit children list
+                    if let ckChild = children.first(where: { $0.id == cloudKitRecordID }) {
+                        ownerRecordID = cloudKitRecordID
+                        print("☁️ [SYNC] Item belongs to child '\(ckChild.name)'")
+                        print("☁️ [SYNC] Using child's CloudKit recordID as owner: \(ownerRecordID ?? "nil")")
+                    } else {
+                        print("⚠️ [SYNC] Local child has CloudKit ID but not found in CloudKit children list")
+                        print("⚠️ [SYNC] Local child CloudKit ID: \(cloudKitRecordID)")
+                        print("⚠️ [SYNC] Available CloudKit children: \(children.map { "\($0.name):\($0.id)" }.joined(separator: ", "))")
+                        // Still use it - might be a sync timing issue
+                        ownerRecordID = cloudKitRecordID
+                    }
+                } else {
+                    print("⚠️ [SYNC] Local child '\(localChild.name)' has no CloudKit record ID")
+                    print("⚠️ [SYNC] Creating CloudKit record for child...")
+                    // Create CloudKit record for this child
+                    let childRecord = try await cloudKit.saveChild(name: localChild.name)
+                    localChild.cloudKitRecordID = childRecord.recordID.recordName
+                    try modelContext.save()
+                    ownerRecordID = childRecord.recordID.recordName
+                    print("✅ [SYNC] Created CloudKit record for child: \(ownerRecordID ?? "nil")")
+                }
+            } else {
+                // Item belongs to current user (nil means use current user's record ID)
+                print("☁️ [SYNC] Item belongs to current user (no matching child found)")
+                ownerRecordID = nil
+            }
+
+            let savedRecord = try await cloudKit.saveWishlistItem(
+                name: item.name,
+                url: item.url,
+                description: item.itemDescription,
+                imageData: item.imageData,
+                ownerRecordID: ownerRecordID
+            )
+
+            print("✅ [SYNC] Successfully synced '\(item.name)' to CloudKit")
+            print("✅ [SYNC] CloudKit recordID: \(savedRecord.recordID.recordName)")
+            print("✅ [SYNC] ownerID: \(savedRecord["ownerID"] as? String ?? "unknown")")
+            
+            // Verify ownerID is correct
+            let savedOwnerID = savedRecord["ownerID"] as? String ?? ""
+            if let expectedOwnerID = ownerRecordID ?? cloudKit.currentUserRecordID?.recordName {
+                if savedOwnerID != expectedOwnerID {
+                    print("⚠️ [SYNC] WARNING: ownerID mismatch!")
+                    print("⚠️ [SYNC] Expected: \(expectedOwnerID)")
+                    print("⚠️ [SYNC] Got: \(savedOwnerID)")
+                } else {
+                    print("✅ [SYNC] ownerID verified: \(savedOwnerID)")
+                }
+            }
+        } catch {
+            print("❌ [SYNC] Failed to sync item to CloudKit: \(error)")
+            if let ckError = error as? CKError {
+                print("❌ [SYNC] CloudKit error: \(ckError.userFriendlyMessage)")
+            }
+        }
+
+        isSyncingToCloud = false
+    }
+    
+    private func loadChildren() async {
+        guard cloudKit.isSignedInToiCloud else { return }
+        
+        do {
+            let records = try await cloudKit.fetchMyChildren()
+            await MainActor.run {
+                children = records.map { CKChild(from: $0) }
+                print("✅ [ADDGIFT] Loaded \(children.count) children from CloudKit")
+            }
+        } catch {
+            print("❌ [ADDGIFT] Error loading children: \(error)")
+        }
+    }
+    
+    private func deleteItem() {
+        guard let item = itemToEdit else { return }
+        
+        HapticManager.itemDeleted()
+        
+        // Delete from CloudKit first
+        Task {
+            do {
+                // Try to find and delete the CloudKit record
+                if cloudKit.isSignedInToiCloud {
+                    // Determine which owner this item belongs to
+                    var ownerCloudKitID: String?
+                    
+                    // Check if this item belongs to a child
+                    if let childUUID = UUID(uuidString: item.ownerId.uuidString),
+                       let child = children.first(where: { UUID(uuidString: $0.id) == childUUID }) {
+                        // Item belongs to a child - use child's CloudKit record ID
+                        ownerCloudKitID = child.id
+                        print("🗑️ [DELETE] Item '\(item.name)' belongs to child '\(child.name)' (CloudKit ID: \(child.id))")
+                    } else {
+                        // Item belongs to current user - use current user's CloudKit record ID
+                        ownerCloudKitID = cloudKit.currentUserRecordID?.recordName
+                        print("🗑️ [DELETE] Item '\(item.name)' belongs to current user")
+                    }
+                    
+                    // Fetch items for the specific owner
+                    guard let ownerID = ownerCloudKitID else {
+                        print("❌ [DELETE] Could not determine owner CloudKit ID")
+                        return
+                    }
+                    
+                    // Query CloudKit for items with this specific owner
+                    let predicate = NSPredicate(format: "ownerID == %@", ownerID)
+                    let query = CKQuery(recordType: "WishlistItem", predicate: predicate)
+                    let (results, _) = try await cloudKit.publicDatabase.records(matching: query)
+                    let records = results.compactMap { try? $0.1.get() }
+                    
+                    // Find the matching CloudKit record by name
+                    if let matchingRecord = records.first(where: { record in
+                        let recordName = record["name"] as? String ?? ""
+                        return recordName == item.name
+                    }) {
+                        try await cloudKit.deleteWishlistItem(matchingRecord.recordID)
+                        print("✅ [DELETE] Deleted item '\(item.name)' from CloudKit (owner: \(ownerID))")
+                    } else {
+                        print("⚠️ [DELETE] Could not find CloudKit record for item '\(item.name)' with owner \(ownerID)")
+                    }
+                }
+            } catch {
+                print("❌ [DELETE] Failed to delete from CloudKit: \(error)")
+            }
+            
+            // Delete from local database regardless
             await MainActor.run {
                 modelContext.delete(item)
                 onItemAdded() // Trigger refresh

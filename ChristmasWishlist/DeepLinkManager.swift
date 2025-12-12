@@ -7,7 +7,6 @@
 
 import SwiftUI
 import SwiftData
-import CloudKit
 import Combine
 
 class DeepLinkManager: ObservableObject {
@@ -87,16 +86,12 @@ class DeepLinkManager: ObservableObject {
                     print("✅ [DEEPLINK] New: hasApp=\(existing.hasApp), recordID=\(existing.friendUserRecordID ?? "nil")")
                     HapticManager.notification(.success)
 
-                    // IMMEDIATELY download friend's wishlist since they now have a Record ID
-                    Task {
-                        await downloadFriendWishlistImmediately(friendRecordID: recordID, friendName: name, modelContext: modelContext)
-                    }
+                    // Friend's wishlist will be available via Firebase when they navigate to it
                 } catch {
                     print("❌ [DEEPLINK] Failed to save updated friend: \(error)")
                 }
 
-                // Trigger refresh
-                CloudKitManager.shared.shouldRefreshFriends.toggle()
+                // Friend updated - refresh handled by SwiftData
                 return
             }
 
@@ -131,13 +126,7 @@ class DeepLinkManager: ObservableObject {
             print("✅ [DEEPLINK] Friend saved successfully")
             HapticManager.notification(.success)
 
-            // Trigger refresh
-            CloudKitManager.shared.shouldRefreshFriends.toggle()
-
-            // IMMEDIATELY download friend's wishlist from CloudKit
-            Task {
-                await downloadFriendWishlistImmediately(friendRecordID: recordID, friendName: name, modelContext: modelContext)
-            }
+            // Friend saved - refresh handled by SwiftData
         } catch {
             print("❌ [DEEPLINK] Failed to save friend: \(error)")
             HapticManager.notification(.error)
@@ -149,52 +138,9 @@ class DeepLinkManager: ObservableObject {
         showAddConfirmation = false
     }
 
-    @MainActor
-    private func downloadFriendWishlistImmediately(friendRecordID: String, friendName: String, modelContext: ModelContext) async {
-        print("⚡ [IMMEDIATE] Downloading \(friendName)'s wishlist NOW...")
-
-        let cloudKit = CloudKitManager.shared
-
-        guard cloudKit.isSignedInToiCloud else {
-            print("⚠️ [IMMEDIATE] Not signed in to iCloud")
-            return
-        }
-
-        do {
-            // Fetch friend's wishlist items from CloudKit
-            let items = try await cloudKit.fetchFriendWishlistItems(friendRecordID: friendRecordID)
-            print("⚡ [IMMEDIATE] Downloaded \(items.count) items for \(friendName)")
-
-            // Fetch friend's children
-            let children = try await cloudKit.fetchChildrenForUser(userRecordID: friendRecordID)
-            print("⚡ [IMMEDIATE] Downloaded \(children.count) children for \(friendName)")
-
-            // Note: We don't save to SwiftData because friends' items are viewed read-only
-            // They're cached in WishlistCache for display in FriendWishlistView
-
-            print("✅ [IMMEDIATE] \(friendName)'s wishlist ready to view!")
-            HapticManager.notification(.success)
-        } catch {
-            print("❌ [IMMEDIATE] Failed to download wishlist: \(error)")
-        }
-    }
-    
     func generateInviteLink(name: String? = nil) -> URL? {
-        guard let recordID = CloudKitManager.shared.currentUserRecordID?.recordName else {
-            return nil
-        }
-        
-        // Use provided name or default
-        let friendName = name ?? "A Friend"
-        
-        var components = URLComponents()
-        components.scheme = "christmaswishlist"
-        components.host = "add-friend"
-        components.queryItems = [
-            URLQueryItem(name: "id", value: recordID),
-            URLQueryItem(name: "name", value: friendName)
-        ]
-        
-        return components.url
+        // TODO: Implement with Firebase phone number based deep linking
+        // For now, return nil until Firebase deep linking is implemented
+        return nil
     }
 }

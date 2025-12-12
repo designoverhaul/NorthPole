@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreMotion
+import UIKit
 
 // MARK: - Sparkle Particle
 struct SparkleParticle: Identifiable {
@@ -148,66 +149,75 @@ struct SuccessSparkle: View {
 // MARK: - Falling Snow Effect
 struct Snowflake: Identifiable {
     let id = UUID()
-    var x: CGFloat
-    var y: CGFloat
+    var startX: CGFloat
+    var startY: CGFloat
     var size: CGFloat
     var opacity: Double
-    var speed: Double
+    var fallDuration: Double
     var drift: CGFloat
+    var flutterSpeed: Double // Speed for side-to-side flutter
+    var flutterAmount: CGFloat // Amount of side-to-side movement
+    var startTime: Date
 }
 
 struct FallingSnowEffect: View {
     let snowflakeCount: Int
     @State private var snowflakes: [Snowflake] = []
-    @State private var animate = false
+    @State private var startTime: Date = Date()
 
-    init(snowflakeCount: Int = 30) {
+    init(snowflakeCount: Int = 25) {
         self.snowflakeCount = snowflakeCount
     }
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                ForEach(snowflakes) { snowflake in
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [.white, .white.opacity(0.6)],
-                                center: .center,
-                                startRadius: 0,
-                                endRadius: snowflake.size / 2
+            let screenSize = UIScreen.main.bounds.size
+            TimelineView(.periodic(from: .now, by: 0.05)) { context in
+                ZStack {
+                    ForEach(snowflakes) { snowflake in
+                        let elapsed = context.date.timeIntervalSince(snowflake.startTime)
+                        let progress = min(elapsed / snowflake.fallDuration, 1.0)
+                        // Fall from very top to bottom of full screen
+                        let fallDistance = screenSize.height + 200
+                        let currentY = snowflake.startY + fallDistance * progress
+                        // Minimal side-to-side flutter (very subtle)
+                        let flutterX = sin(elapsed * snowflake.flutterSpeed) * snowflake.flutterAmount
+                        
+                        Text("❄️")
+                            .font(.system(size: snowflake.size))
+                            .blur(radius: snowflake.size > 30 ? CGFloat(snowflake.size - 30) * 0.3 : 0)
+                            .position(
+                                x: snowflake.startX + flutterX,
+                                y: currentY
                             )
-                        )
-                        .frame(width: snowflake.size, height: snowflake.size)
-                        .position(
-                            x: animate ? snowflake.x + snowflake.drift : snowflake.x,
-                            y: animate ? geometry.size.height + 50 : snowflake.y
-                        )
-                        .opacity(snowflake.opacity)
-                        .animation(
-                            .linear(duration: snowflake.speed)
-                            .repeatForever(autoreverses: false),
-                            value: animate
-                        )
+                            .opacity(progress < 1.0 ? snowflake.opacity : 0)
+                            .rotationEffect(.degrees(elapsed * 20)) // Simple slow rotation
+                    }
                 }
             }
             .onAppear {
-                generateSnowflakes(in: geometry.size)
-                animate = true
+                startTime = Date()
+                let screenSize = UIScreen.main.bounds.size
+                generateSnowflakes(in: screenSize)
             }
         }
+        .ignoresSafeArea()
         .allowsHitTesting(false)
     }
 
-    private func generateSnowflakes(in size: CGSize) {
+    private func generateSnowflakes(in screenSize: CGSize) {
         snowflakes = (0..<snowflakeCount).map { _ in
-            Snowflake(
-                x: CGFloat.random(in: 0...size.width),
-                y: CGFloat.random(in: -size.height...0),
-                size: CGFloat.random(in: 2...6),
-                opacity: Double.random(in: 0.3...0.7),
-                speed: Double.random(in: 8...15),
-                drift: CGFloat.random(in: -30...30)
+            let flakeSize = CGFloat.random(in: 20...40) // Much larger snowflakes
+            return Snowflake(
+                startX: CGFloat.random(in: 0...screenSize.width),
+                startY: -100, // Start from the very top edge of screen (off-screen above header)
+                size: flakeSize,
+                opacity: Double.random(in: 0.8...1.0), // More visible
+                fallDuration: Double.random(in: 4...7), // Shorter duration for quick fall
+                drift: 0, // No drift - just fall straight down
+                flutterSpeed: Double.random(in: 0.2...0.8), // Very slow flutter
+                flutterAmount: CGFloat.random(in: 3...10), // Minimal side-to-side movement
+                startTime: startTime.addingTimeInterval(Double.random(in: 0...0.5)) // Start almost immediately
             )
         }
     }

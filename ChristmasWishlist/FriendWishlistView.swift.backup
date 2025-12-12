@@ -6,43 +6,142 @@
 //
 
 import SwiftUI
+import CloudKit
 import SwiftData
-import OSLog
 
-private let logger = Logger(subsystem: "com.designoverhaul.ChristmasWishlist", category: "FriendWishlist")
-
-// MARK: - Friend Wishlist Item (read-only representation)
-struct FriendWishlistItem: Identifiable {
-    let id: String // Firestore document ID
-    let name: String
-    let url: String?
-    let itemDescription: String?
-    let imageUrl: String?
-    let createdAt: Date
-    let isPurchased: Bool
-    var imageData: Data? // Loaded separately
+// MARK: - Wishlist Cache
+class WishlistCache {
+    static let shared = WishlistCache()
+    private var cache: [String: CachedWishlist] = [:]
+    private let cacheKeyPrefix = "wishlist_cache_"
     
-    init(from firestoreItem: FirestoreWishlistItem, itemId: String) {
-        self.id = itemId
-        self.name = firestoreItem.name
-        self.url = firestoreItem.url
-        self.itemDescription = firestoreItem.itemDescription
-        self.imageUrl = firestoreItem.imageUrl
-        self.createdAt = firestoreItem.createdAt.toDate
-        self.isPurchased = firestoreItem.isPurchased
-        self.imageData = nil
+    struct CachedWishlist {
+        let items: [CKWishlistItem]
+        let purchases: [String: CKPurchase]
+        let timestamp: Date
+        
+        // Convert to codable format for persistence
+        private func toCodable() -> CodableWishlist {
+            let codableItems = items.map { CodableWishlistItem(from: $0) }
+            let codablePurchases = purchases.mapValues { CodablePurchase(from: $0) }
+            return CodableWishlist(items: codableItems, purchases: codablePurchases, timestamp: timestamp)
+        }
+        
+        private static func fromCodable(_ codable: CodableWishlist) -> CachedWishlist? {
+            // We can't recreate CKWishlistItem from codable without the CKRecord
+            // So we'll only use this for timestamp checking
+            // The actual items need to be loaded from CloudKit
+            return nil
+        }
+    }
+    
+    // Codable versions for persistence (stored but not fully reconstructible)
+    private struct CodableWishlist: Codable {
+        let items: [CodableWishlistItem]
+        let purchases: [String: CodablePurchase]
+        let timestamp: Date
+    }
+    
+    private struct CodableWishlistItem: Codable {
+        let id: String
+        let name: String
+        let url: String?
+        let itemDescription: String?
+        let imageData: Data?
+        let createdAt: Date
+        let ownerID: String
+        
+        init(from item: CKWishlistItem) {
+            self.id = item.id
+            self.name = item.name
+            self.url = item.url
+            self.itemDescription = item.itemDescription
+            self.imageData = item.imageData
+            self.createdAt = item.createdAt
+            self.ownerID = item.ownerID
+        }
+    }
+    
+    private struct CodablePurchase: Codable {
+        let recordID: String
+        let itemRecordID: String
+        let purchaserUserRecordID: String
+        let purchasedAt: Date
+        
+        init(from purchase: CKPurchase) {
+            self.recordID = purchase.id
+            self.itemRecordID = purchase.itemRecordID
+            self.purchaserUserRecordID = purchase.purchaserUserRecordID
+            self.purchasedAt = purchase.purchasedAt
+        }
+    }
+    
+    init() {
+        // Cache is in-memory only for now
+        // We'll persist the timestamp to know when we last cached
+    }
+    
+    func get(for key: String) -> CachedWishlist? {
+        return cache[key]
+    }
+    
+    func set(_ wishlist: CachedWishlist, for key: String) {
+        cache[key] = wishlist
+        // Store timestamp for cache freshness checking
+        saveTimestamp(wishlist.timestamp, for: key)
+    }
+    
+    func clear(for key: String) {
+        cache.removeValue(forKey: key)
+        removeTimestamp(for: key)
+    }
+    
+    func clearAll() {
+        cache.removeAll()
+        clearAllTimestamps()
+    }
+    
+    // Check if we have a cached timestamp (indicates we've loaded before)
+    func hasCachedTimestamp(for key: String) -> Bool {
+        guard let defaults = AppGroupContainer.sharedDefaults else { return false }
+        let timestampKey = cacheKeyPrefix + key + "_timestamp"
+        return defaults.object(forKey: timestampKey) != nil
+    }
+    
+    // MARK: - Timestamp Persistence (to know if we've cached before)
+    
+    private func saveTimestamp(_ timestamp: Date, for key: String) {
+        guard let defaults = AppGroupContainer.sharedDefaults else { return }
+        let timestampKey = cacheKeyPrefix + key + "_timestamp"
+        defaults.set(timestamp.timeIntervalSince1970, forKey: timestampKey)
+        defaults.synchronize()
+    }
+    
+    private func removeTimestamp(for key: String) {
+        guard let defaults = AppGroupContainer.sharedDefaults else { return }
+        let timestampKey = cacheKeyPrefix + key + "_timestamp"
+        defaults.removeObject(forKey: timestampKey)
+        defaults.synchronize()
+    }
+    
+    private func clearAllTimestamps() {
+        guard let defaults = AppGroupContainer.sharedDefaults else { return }
+        let allKeys = defaults.dictionaryRepresentation().keys
+        for key in allKeys where key.hasPrefix(cacheKeyPrefix) && key.hasSuffix("_timestamp") {
+            defaults.removeObject(forKey: key)
+        }
+        defaults.synchronize()
     }
 }
 
 struct FriendWishlistView: View {
     let friend: Friend
-    let childId: String?
-    let childName: String?
-    
+    let child: Child?
+
     @Environment(\.modelContext) private var modelContext
-    @ObservedObject private var firebase = FirebaseManager.shared
-    @State private var items: [FriendWishlistItem] = []
-    @State private var purchases: [String: FirestorePurchase] = [:] // itemId -> Purchase
+    @ObservedObject private var cloudKit = CloudKitManager.shared
+    @State private var items: [CKWishlistItem] = []
+    @State private var purchases: [String: CKPurchase] = [:] // itemRecordID -> Purchase
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var purchasedItemIdForSparkle: String? = nil
@@ -51,20 +150,45 @@ struct FriendWishlistView: View {
     @State private var showingDeleteAlert = false
     @State private var showingHideChildAlert = false
     @State private var showingPurchaseConfirmation = false
-    @State private var itemToPurchase: FriendWishlistItem?
+    @State private var itemToPurchase: CKWishlistItem?
     @State private var isCheckingForApp = false
     @Environment(\.dismiss) private var dismiss
 
-    private var displayName: String {
-        childName ?? friend.name
+    // Cache key based on friend/child
+    private var cacheKey: String {
+        if let child = child {
+            return "child_\(child.id)"
+        }
+        return "friend_\(friend.friendUserRecordID ?? friend.id.uuidString)"
+    }
+
+    init(friend: Friend, child: Child? = nil) {
+        self.friend = friend
+        self.child = child
     }
     
-    private var ownerPhone: String? {
-        if let childId = childId {
-            // For children, we'll need to get the parent's phone from the friend
-            return friend.phoneNumber
+    // Load cached data immediately when view is created
+    private func loadCachedDataIfAvailable() {
+        // Only load if friend has app
+        guard friend.hasApp else { return }
+        
+        // Check cache first
+        if let cached = WishlistCache.shared.get(for: cacheKey) {
+            print("💾 [CACHE] Loading cached data immediately for \(friend.name)")
+            items = cached.items
+            purchases = cached.purchases
         }
-        return friend.phoneNumber
+    }
+
+    private var displayName: String {
+        child?.name ?? friend.name
+    }
+
+    private var ownerRecordID: String? {
+        if let child = child {
+            return child.id
+        }
+        return friend.friendUserRecordID
     }
 
     var body: some View {
@@ -73,6 +197,7 @@ struct FriendWishlistView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
+                // Content area - always takes full space
                 ZStack {
                     if isCheckingForApp {
                         SnowflakeLoadingView("Checking if friend has app...")
@@ -80,8 +205,10 @@ struct FriendWishlistView: View {
                     } else if !friend.hasApp {
                         noAppView
                     } else if items.isEmpty && !isLoading {
+                        // Only show empty state if we're not loading and have no items
                         emptyWishlistView
                     } else if items.isEmpty && isLoading {
+                        // Show loading state when loading and no cached data
                         VStack(spacing: Spacing.lg) {
                             Spacer()
                             SnowflakeLoadingView("Loading wishlist...")
@@ -125,6 +252,7 @@ struct FriendWishlistView: View {
                         }
                     }
 
+                    // Non-blocking loading indicator at the bottom - show during loading
                     if isLoading {
                         VStack {
                             Spacer()
@@ -159,13 +287,21 @@ struct FriendWishlistView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            
+            // Falling snow overlay - covers entire screen including header
+            // Temporarily hidden
+            // if showFallingSnow {
+            //     FallingSnowEffect(snowflakeCount: Int.random(in: 15...25))
+            //         .allowsHitTesting(false)
+            //         .transition(.opacity)
+            // }
         }
         .navigationTitle("")
         .friendNameTitle(displayName)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
-                    if childId != nil {
+                    if child != nil {
                         Button(action: {
                             showingHideChildAlert = true
                         }) {
@@ -195,18 +331,28 @@ struct FriendWishlistView: View {
                 }
             }
         }
+        .onAppear {
+            // Load cached data immediately (synchronous, no await)
+            loadCachedDataIfAvailable()
+        }
         .task {
-            logger.info("👁️ [APPEAR] FriendWishlistView appeared for \(friend.name)")
-            logger.info("👁️ [APPEAR] hasApp: \(friend.hasApp), childId: \(childId ?? "nil")")
+            print("👁️ [APPEAR] FriendWishlistView appeared for \(friend.name)")
+            print("👁️ [APPEAR] hasApp: \(friend.hasApp), recordID: \(friend.friendUserRecordID ?? "nil")")
 
+            // If friend doesn't have app, check if they've installed it since we last checked
             if !friend.hasApp {
-                logger.info("👁️ [APPEAR] Friend doesn't have app, checking...")
+                print("👁️ [APPEAR] Friend doesn't have app, checking...")
                 await checkIfFriendHasApp()
             }
 
+            // Only load items if friend has the app
             if friend.hasApp {
-                logger.info("👁️ [APPEAR] Loading fresh data...")
+                // Always refresh in background (cached data already shown if available)
+                // This ensures we have the latest data
+                print("👁️ [APPEAR] Loading fresh data in background...")
                 await loadItems(forceRefresh: false)
+            } else {
+                print("⚠️ [APPEAR] Still no app after check, showing no-app view")
             }
         }
         .sheet(isPresented: $showingShareSheet) {
@@ -226,8 +372,8 @@ struct FriendWishlistView: View {
                 hideChild()
             }
         } message: {
-            if let childName = childName {
-                Text("Hide \(childName)? You can unhide them later from the friend's wishlist.")
+            if let child = child {
+                Text("Hide \(child.name)? You can unhide them later from the friend's wishlist.")
             }
         }
         .alert(itemToPurchase.map { purchases[$0.id] != nil ? "Mark \($0.name) as unpurchased?" : "Mark \($0.name) as purchased?" } ?? "Mark item as purchased?",
@@ -259,11 +405,55 @@ struct FriendWishlistView: View {
                 .font(.system(size: 72))
                 .foregroundColor(.warmGrayLight)
 
-            Text("\(friend.name) has not installed this app yet")
+            Text("Can't connect to \(friend.name)")
                 .font(.headingMedium)
                 .foregroundColor(.warmGray)
                 .multilineTextAlignment(.center)
 
+            Text("To see each other's wishlists, you both need to share your profile links")
+                .font(.bodyMedium)
+                .foregroundColor(.warmGray)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, Spacing.lg)
+
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    Text("1.")
+                        .fontWeight(.semibold)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Go to My Wishlist tab")
+                        Text("Tap")
+                            .foregroundColor(.warmGray)
+                        + Text(" ")
+                        + Text(Image(systemName: "square.and.arrow.up"))
+                            .foregroundColor(.forestGreen)
+                        + Text(" in top right")
+                            .foregroundColor(.warmGray)
+                    }
+                }
+
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    Text("2.")
+                        .fontWeight(.semibold)
+                    Text("Send the link to \(String(friend.name.split(separator: " ").first ?? "them"))")
+                }
+
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    Text("3.")
+                        .fontWeight(.semibold)
+                    Text("Ask them to send you theirs too")
+                }
+            }
+            .font(.bodyMedium)
+            .foregroundColor(.warmBlack)
+            .padding(Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: CornerRadius.md)
+                    .fill(Color.gold.opacity(0.1))
+            )
+            .padding(.horizontal, Spacing.lg)
+
+            // Only show invite button if they haven't installed yet
             Button(action: {
                 HapticManager.buttonTapped()
                 showingShareSheet = true
@@ -307,102 +497,115 @@ struct FriendWishlistView: View {
         isCheckingForApp = true
         defer { isCheckingForApp = false }
 
-        logger.info("🔍 Checking if \(friend.name) has installed the app...")
+        print("🔍 Checking if \(friend.name) has installed the app...")
 
-        guard let phone = friend.phoneNumber else { return }
-
+        // Try to discover the friend by phone or email
         do {
-            let hasApp = try await firebase.checkIfFriendHasApp(friendPhone: phone)
-            
-            if hasApp {
-                logger.info("✅ Found \(friend.name)! They have the app now.")
+            // Use the new combined discovery method (tries phone first, then email)
+            let phoneNumbers = friend.phoneNumber.map { [$0] } ?? []
+            let emails = friend.email.map { [$0] } ?? []
+
+            let discoveredRecordID = try await cloudKit.discoverUser(
+                phoneNumbers: phoneNumbers,
+                emails: emails
+            )
+
+            // If we found them, update the friend record
+            if let recordID = discoveredRecordID {
+                print("✅ Found \(friend.name)! They have the app now. Record ID: \(recordID.recordName)")
+
                 await MainActor.run {
+                    // Update local friend record
+                    friend.friendUserRecordID = recordID.recordName
                     friend.hasApp = true
                     try? modelContext.save()
                 }
             } else {
-                logger.info("❌ \(friend.name) hasn't installed the app yet")
+                print("❌ \(friend.name) hasn't installed the app yet")
             }
         } catch {
-            logger.error("❌ Error checking if friend has app: \(error)")
+            print("❌ Error checking if friend has app: \(error)")
         }
     }
 
+
     private func loadItems(forceRefresh: Bool = false) async {
-        logger.info("📦 [LOAD_ITEMS] Loading items for \(friend.name)")
-        
-        guard friend.hasApp else {
-            logger.warning("⚠️ [LOAD_ITEMS] Friend doesn't have app")
+        print("📦 [LOAD_ITEMS] ===== Starting to load items (forceRefresh: \(forceRefresh)) =====")
+        print("📦 [LOAD_ITEMS] Friend: \(friend.name)")
+        print("📦 [LOAD_ITEMS] Friend hasApp: \(friend.hasApp)")
+        print("📦 [LOAD_ITEMS] Friend recordID: \(friend.friendUserRecordID ?? "nil")")
+        print("📦 [LOAD_ITEMS] Child: \(child?.name ?? "nil")")
+        print("📦 [LOAD_ITEMS] OwnerRecordID: \(ownerRecordID ?? "nil")")
+
+        // Only load if owner has a record ID
+        guard let recordID = ownerRecordID else {
+            print("❌ [LOAD_ITEMS] No owner record ID - cannot load items")
             items = []
             return
         }
 
+        // Always fetch fresh data (cached data already shown in onAppear)
+        // Only skip if we're forcing a refresh and have cache (handled above)
+        print("📦 [LOAD_ITEMS] Fetching fresh data from CloudKit...")
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let itemsWithIds: [(itemId: String, item: FirestoreWishlistItem)]
-            
-            if let childId = childId {
-                // Load items for a specific child
-                itemsWithIds = try await firebase.fetchFriendWishlistItemsWithIds(ownerPhone: nil, childId: childId)
-            } else if let ownerPhone = ownerPhone {
-                // Load items for the friend (user, not a child)
-                itemsWithIds = try await firebase.fetchFriendWishlistItemsWithIds(ownerPhone: ownerPhone)
-            } else {
-                logger.error("❌ [LOAD_ITEMS] No ownerPhone or childId")
-                items = []
-                return
+            let records = try await cloudKit.fetchFriendWishlistItems(friendRecordID: recordID)
+            print("✅ [LOAD_ITEMS] Successfully fetched \(records.count) records from CloudKit")
+
+            let loadedItems = records.map { CKWishlistItem(from: $0) }
+            print("✅ [LOAD_ITEMS] Mapped to \(loadedItems.count) CKWishlistItem objects")
+
+            // Log each item
+            for (index, item) in loadedItems.enumerated() {
+                print("   Item \(index + 1): \(item.name)")
             }
 
-            logger.info("✅ [LOAD_ITEMS] Fetched \(itemsWithIds.count) items from Firebase")
-
-            // Convert to FriendWishlistItem and load images
-            var loadedItems: [FriendWishlistItem] = []
-            var purchaseDict: [String: FirestorePurchase] = [:]
-            
-            for (itemId, firestoreItem) in itemsWithIds {
-                var item = FriendWishlistItem(from: firestoreItem, itemId: itemId)
-                
-                // Load image if URL exists
-                if let imageUrl = firestoreItem.imageUrl, !imageUrl.isEmpty {
-                    do {
-                        let imageData = try await FirebaseStorageManager.shared.downloadImage(from: imageUrl)
-                        item.imageData = imageData
-                    } catch {
-                        logger.warning("⚠️ Failed to load image for \(item.name): \(error)")
-                    }
-                }
-                
-                loadedItems.append(item)
-                
-                // Load purchases for this item
+            // Load purchases for all items
+            var purchaseDict: [String: CKPurchase] = [:]
+            for item in loadedItems {
                 do {
-                    let purchasesWithIds = try await firebase.fetchPurchasesForItemWithIds(itemId: itemId)
-                    // Store the purchase with its ID in the itemId key
-                    // We'll need to store purchaseId separately for deletion, but for now just store the purchase
-                    if let (_, firstPurchase) = purchasesWithIds.first {
-                        purchaseDict[itemId] = firstPurchase
+                    let purchaseRecords = try await cloudKit.fetchPurchasesForItem(itemRecordID: item.id)
+                    // Just take the first purchase (most recent)
+                    if let firstPurchase = purchaseRecords.first {
+                        purchaseDict[item.id] = CKPurchase(from: firstPurchase)
                     }
                 } catch {
-                    logger.warning("⚠️ Failed to load purchases for \(item.name): \(error)")
+                    print("⚠️ [LOAD_ITEMS] Error loading purchases for item \(item.id): \(error)")
                 }
             }
+
+            // Cache the results
+            let cached = WishlistCache.CachedWishlist(
+                items: loadedItems,
+                purchases: purchaseDict,
+                timestamp: Date()
+            )
+            WishlistCache.shared.set(cached, for: cacheKey)
+            print("💾 [CACHE] Cached \(loadedItems.count) items for key: \(cacheKey)")
 
             await MainActor.run {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     items = loadedItems
                     purchases = purchaseDict
                 }
-                logger.info("✅ [LOAD_ITEMS] UI updated with \(items.count) items")
+                print("✅ [LOAD_ITEMS] UI updated with \(items.count) items")
             }
         } catch {
-            logger.error("❌ [LOAD_ITEMS] Failed to load wishlist: \(error)")
+            print("❌ [LOAD_ITEMS] Failed to load wishlist: \(error)")
+            if let ckError = error as? CKError {
+                print("❌ [LOAD_ITEMS] CloudKit error code: \(ckError.code.rawValue)")
+                print("❌ [LOAD_ITEMS] CloudKit error: \(ckError)")
+            }
             errorMessage = "Failed to load wishlist: \(error.localizedDescription)"
         }
+
+        print("📦 [LOAD_ITEMS] ===== Finished loading items =====")
     }
 
-    private func togglePurchase(_ item: FriendWishlistItem) {
+    private func togglePurchase(_ item: CKWishlistItem) {
+        // Show confirmation alert
         itemToPurchase = item
         showingPurchaseConfirmation = true
     }
@@ -415,56 +618,66 @@ struct FriendWishlistView: View {
             do {
                 let wasPurchased = purchases[item.id] != nil
 
+                // Check if this item is already purchased
                 if wasPurchased {
                     // Unpurchase: Delete the purchase record
-                    guard let userPhone = FirebaseAuthManager.shared.currentUserPhone else {
-                        throw FirebaseError.notAuthenticated
+                    if let existingPurchase = purchases[item.id] {
+                        try await cloudKit.deletePurchase(existingPurchase.record.recordID)
                     }
-                    
-                    // Find the purchase made by current user
-                    let purchasesWithIds = try await firebase.fetchPurchasesForItemWithIds(itemId: item.id)
-                    if let (purchaseId, purchase) = purchasesWithIds.first(where: { $0.purchase.purchaserPhone == userPhone }) {
-                        // Delete the purchase
-                        try await firebase.deletePurchase(purchaseId: purchaseId, itemId: item.id)
-                        
-                        await MainActor.run {
-                            purchases.removeValue(forKey: item.id)
-                            HapticManager.impact(.medium)
-                        }
-                        
-                        logger.info("✅ Unmarked item as purchased")
+
+                    // Update UI
+                    await MainActor.run {
+                        purchases.removeValue(forKey: item.id)
+                        HapticManager.impact(.medium)
                     }
+
+                    print("✅ Unmarked item as purchased")
                 } else {
                     // Purchase: Create a new purchase record
-                    guard let ownerPhone = ownerPhone else { return }
-                    
-                    let purchaseId = try await firebase.savePurchase(
-                        itemId: item.id,
-                        itemName: item.name,
-                        ownerPhone: ownerPhone
-                    )
+                    let purchaseRecord = try await cloudKit.savePurchase(itemRecordID: item.id)
 
-                    // Fetch the purchase back to store in dict
-                    let purchaseRecords = try await firebase.fetchPurchasesForItem(itemId: item.id)
-                    if let firstPurchase = purchaseRecords.first {
-                        await MainActor.run {
-                            purchases[item.id] = firstPurchase
-                            HapticManager.itemMarkedPurchased()
-                            purchasedItemIdForSparkle = item.id
-                        }
+                    // Update UI
+                    await MainActor.run {
+                        purchases[item.id] = CKPurchase(from: purchaseRecord)
+                        HapticManager.itemMarkedPurchased()
+                        purchasedItemIdForSparkle = item.id
+                        
+                        // Trigger snow effect - temporarily disabled
+                        // showFallingSnow = false // Reset first
+                        // DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        //     showFallingSnow = true
+                        //     
+                        //     // Hide snow after animation completes (shorter for quick fall)
+                        //     DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
+                        //         showFallingSnow = false
+                        //     }
+                        // }
                     }
 
-                    logger.info("✅ Marked item as purchased")
+                    // Track for review prompt (after first purchase)
+                    ReviewManager.shared.markFirstPurchase()
+
+                    print("✅ Marked item as purchased")
                 }
+
+                // Update cache with new purchase state
+                let cached = WishlistCache.CachedWishlist(
+                    items: items,
+                    purchases: purchases,
+                    timestamp: Date()
+                )
+                WishlistCache.shared.set(cached, for: cacheKey)
+                print("💾 [CACHE] Updated cache after purchase toggle")
+
             } catch {
                 errorMessage = "Failed to update item: \(error.localizedDescription)"
                 HapticManager.errorOccurred()
-                logger.error("❌ Failed to toggle purchase: \(error)")
             }
         }
     }
 
     private func createInviteMessage() -> String {
+
         return """
         I have a wishlist here if you are interested. I would like to see yours as well. Get the list here:
 
@@ -480,22 +693,26 @@ struct FriendWishlistView: View {
     }
 
     private func hideChild() {
-        guard let childId = childId else { return }
+        guard let child = child else { return }
 
-        friend.hiddenChildRecordIDs.append(childId)
+        // Update local friend record
+        friend.hiddenChildRecordIDs.append(child.id)
         try? modelContext.save()
 
         HapticManager.buttonTapped()
         dismiss()
     }
     
-    private func computeGiftIndex(for item: FriendWishlistItem, in allItems: [FriendWishlistItem], purchases: [String: FirestorePurchase]) -> Int? {
-        guard purchases[item.id] != nil else { return nil }
+    // Compute gift index for an item based on its position among purchased items
+    private func computeGiftIndex(for item: CKWishlistItem, in allItems: [CKWishlistItem], purchases: [String: CKPurchase]) -> Int? {
+        guard purchases[item.id] != nil else { return nil } // Not purchased
         
+        // Find all purchased items and sort them by creation date (or ID for consistency)
         let purchasedItems = allItems
             .filter { purchases[$0.id] != nil }
-            .sorted { $0.createdAt < $1.createdAt }
+            .sorted { $0.createdAt < $1.createdAt } // Sort by creation date
         
+        // Find this item's index in the sorted purchased items list
         if let index = purchasedItems.firstIndex(where: { $0.id == item.id }) {
             return index
         }
@@ -506,7 +723,7 @@ struct FriendWishlistView: View {
 // MARK: - Friend Item Detail View
 
 struct FriendItemDetailView: View {
-    let item: FriendWishlistItem
+    let item: CKWishlistItem
     let isPurchased: Bool
     let onTogglePurchase: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -537,11 +754,11 @@ struct FriendItemDetailView: View {
                         .padding(.horizontal)
 
                     // Purchase status badge
-                    if isPurchased {
+                    if item.isPurchased, let purchasedAt = item.purchasedAt {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.successGreen)
-                            Text("Checked off")
+                            Text("Checked off \(purchasedAt.formatted(date: .abbreviated, time: .omitted))")
                                 .font(.bodyMedium)
                                 .fontWeight(.medium)
                                 .foregroundColor(.successGreen)
@@ -585,6 +802,7 @@ struct FriendItemDetailView: View {
                         }
                     }
 
+                    // Purchase toggle button
                     // Purchase toggle button
                     Button(action: {
                         HapticManager.buttonTapped()
@@ -637,12 +855,26 @@ struct FriendItemDetailView: View {
     }
 }
 
-// MARK: - Friend Wishlist Item Row
+// MARK: - Share Sheet
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
 
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: nil
+        )
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Friend Wishlist Item Row
 struct FriendWishlistItemRow: View {
-    let item: FriendWishlistItem
+    let item: CKWishlistItem
     let isPurchased: Bool
-    let giftIndex: Int?
+    let giftIndex: Int? // Index among purchased items (0-based) for cycling through gifts
     let showSparkle: Bool
     let onSparkleComplete: () -> Void
     @AppStorage("showPurchasedItems") private var showPurchasedItems = true
@@ -694,17 +926,15 @@ struct FriendWishlistItemRow: View {
     }
 }
 
-
 #Preview {
     NavigationStack {
         FriendWishlistView(
             friend: Friend(
                 name: "Grace",
-                phoneNumber: "1234567890",
-                hasApp: true
+                hasApp: true,
+                friendUserRecordID: "testID"
             ),
-            childId: nil,
-            childName: nil
+            child: nil as Child?
         )
         .modelContainer(for: Friend.self, inMemory: true)
     }

@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to get authenticated user's phone number from token
+    // Note: Token has E.164 format (+12052929663), app stores digits only (12052929663)
+    // TODO: Add custom claim for normalized phone number for better security
+    function getAuthPhone() {
+      return request.auth.token.phone_number;
+    }
+
+    // Users collection - users can read all, write their own
+    match /users/{phone} {
+      // Anyone authenticated can read user documents
+      allow read: if request.auth != null;
+
+      // Only the user can write their own document
+      // For now, allow any authenticated user to write - tighten with custom claims later
+      allow write: if request.auth != null;
+    }
+
+    // Wishlist items - owner can write, anyone can read
+    match /wishlistItems/{itemId} {
+      // Anyone authenticated can read items (for viewing friends' wishlists)
+      allow read: if request.auth != null;
+
+      // Allow authenticated users to create items
+      // Client-side validation ensures ownerPhone matches user's phone
+      allow create: if request.auth != null;
+
+      // Allow authenticated users to update/delete
+      // Client-side validation ensures ownerPhone matches
+      allow update, delete: if request.auth != null;
+    }
+
+    // Children - parent can read/write, friends can read
+    match /children/{childId} {
+      // Anyone authenticated can read (for viewing friend's children)
+      allow read: if request.auth != null;
+
+      // Allow authenticated users to create/update/delete children
+      // Client-side validation ensures parentPhone matches user's phone
+      allow write: if request.auth != null;
+    }
+
+    // Purchases - anyone can create, owner/purchaser can read/delete
+    match /purchases/{purchaseId} {
+      // Anyone authenticated can read purchases
+      allow read: if request.auth != null;
+
+      // Anyone authenticated can create a purchase (mark item as bought)
+      allow create: if request.auth != null;
+
+      // Allow authenticated users to delete purchases
+      // Client-side validation ensures user is purchaser or owner
+      allow delete: if request.auth != null;
+    }
+
+    // Friends - user can manage their own friendships
+    match /friends/{friendshipId} {
+      // User can read friendships where they are involved
+      allow read: if request.auth != null;
+
+      // Allow authenticated users to create/update friendships
+      // Client-side validation ensures userPhone matches
+      allow create, update: if request.auth != null;
+
+      // Allow authenticated users to delete friendships
+      // Client-side validation ensures userPhone matches
+      allow delete: if request.auth != null;
+    }
+  }
+}

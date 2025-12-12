@@ -7,10 +7,9 @@
 
 import SwiftUI
 import SwiftData
-import CloudKit
 
 struct SettingsView: View {
-    @ObservedObject private var cloudKit = CloudKitManager.shared
+    @ObservedObject private var firebase = FirebaseManager.shared
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("showPurchasedItems") private var showPurchasedItems = true
     @State private var showingPermissionAlert = false
@@ -140,12 +139,31 @@ struct SettingsView: View {
                                 Spacer()
                             }
                         }
-                        .disabled(!cloudKit.isSignedInToiCloud)
+                        .disabled(!firebase.isAuthenticated)
                         .listRowBackground(Color.creamCard)
                     } header: {
                         Text("Account")
                             .foregroundColor(.forestGreen)
                     }
+
+                    #if DEBUG
+                    Section {
+                        NavigationLink {
+                            CloudKitDebugView()
+                        } label: {
+                            HStack {
+                                Image(systemName: "ladybug.fill")
+                                    .foregroundColor(.forestGreen)
+                                Text("CloudKit Debug")
+                                    .foregroundColor(.warmBlack)
+                            }
+                        }
+                        .listRowBackground(Color.creamCard)
+                    } header: {
+                        Text("Developer Tools")
+                            .foregroundColor(.forestGreen)
+                    }
+                    #endif
 
                     Section {
                         Link(destination: URL(string: "https://designoverhaul.com/privacy-policy-north-pole/")!) {
@@ -163,7 +181,7 @@ struct SettingsView: View {
                         .listRowBackground(Color.creamCard)
                     } header: {
                         Text("Legal")
-                            .foregroundColor(.forestGreen)
+                        .foregroundColor(.forestGreen)
                     }
 
                     // App Version Footer
@@ -320,43 +338,15 @@ struct SettingsView: View {
     }
 
     private func checkSubscriptions() {
-        Task {
-            do {
-                let subscriptions = try await cloudKit.fetchAllSubscriptions()
-                await MainActor.run {
-                    if subscriptions.isEmpty {
-                        errorAlertMessage = "No active CloudKit subscriptions found. This might be why you're not receiving notifications. Try 'Reset Notification Subscriptions'."
-                        showingErrorAlert = true
-                    } else {
-                        let subscriptionList = subscriptions.map { "• \($0.subscriptionID)" }.joined(separator: "\n")
-                        successAlertMessage = "Found \(subscriptions.count) active subscription(s):\n\n\(subscriptionList)"
-                        showingSuccessAlert = true
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    errorAlertMessage = "Failed to check subscriptions: \(error.localizedDescription)"
-                    showingErrorAlert = true
-                }
-            }
-        }
+        // TODO: Implement Firebase FCM subscription check
+        errorAlertMessage = "Subscription checking not yet implemented with Firebase"
+        showingErrorAlert = true
     }
 
     private func resubscribeToNotifications() {
-        Task {
-            do {
-                try await cloudKit.resubscribeToAll()
-                await MainActor.run {
-                    successAlertMessage = "Successfully reset notification subscriptions! You should now receive notifications when friends purchase your items."
-                    showingSuccessAlert = true
-                }
-            } catch {
-                await MainActor.run {
-                    errorAlertMessage = "Failed to reset subscriptions: \(error.localizedDescription)"
-                    showingErrorAlert = true
-                }
-            }
-        }
+        // TODO: Implement Firebase FCM resubscription
+        errorAlertMessage = "Notification resubscription not yet implemented with Firebase"
+        showingErrorAlert = true
     }
 
     private func testLocalNotification() {
@@ -425,137 +415,28 @@ struct SettingsView: View {
     }
 
     private func cleanCloudKitDuplicates() {
-        Task {
-            print("🧹 [CLOUDKIT_CLEAN] User requested CloudKit duplicate removal")
-
-            guard cloudKit.isSignedInToiCloud else {
-                await MainActor.run {
-                    errorAlertMessage = "Not signed in to iCloud. Please sign in to clean CloudKit duplicates."
-                    showingErrorAlert = true
-                }
-                return
-            }
-
-            do {
-                // Fetch ALL wishlist items from CloudKit
-                let allRecords = try await cloudKit.fetchMyWishlistItems()
-                print("🧹 [CLOUDKIT_CLEAN] Fetched \(allRecords.count) total items from CloudKit")
-
-                // Group by unique key: name + ownerID
-                var itemGroups: [String: [CKRecord]] = [:]
-
-                for record in allRecords {
-                    let itemName = record["name"] as? String ?? "Unknown"
-                    let ownerRef = record["ownerID"] as? CKRecord.Reference
-                    let ownerID = ownerRef?.recordID.recordName ?? "no_owner"
-
-                    let uniqueKey = "\(itemName)_\(ownerID)"
-
-                    if itemGroups[uniqueKey] == nil {
-                        itemGroups[uniqueKey] = []
-                    }
-                    itemGroups[uniqueKey]?.append(record)
-                }
-
-                // Find duplicates (groups with more than 1 record)
-                var recordsToDelete: [CKRecord.ID] = []
-                var totalDuplicates = 0
-
-                for (key, records) in itemGroups {
-                    if records.count > 1 {
-                        // Sort by creation date (keep the most recent)
-                        let sortedRecords = records.sorted { r1, r2 in
-                            let date1 = r1.creationDate ?? Date.distantPast
-                            let date2 = r2.creationDate ?? Date.distantPast
-                            return date1 > date2 // Most recent first
-                        }
-
-                        // Keep the first (most recent), delete the rest
-                        let duplicates = Array(sortedRecords.dropFirst())
-                        for duplicate in duplicates {
-                            recordsToDelete.append(duplicate.recordID)
-                        }
-
-                        totalDuplicates += duplicates.count
-                        print("🧹 [CLOUDKIT_CLEAN] Found \(records.count) copies of '\(key)' - will delete \(duplicates.count) duplicates")
-                    }
-                }
-
-                print("🧹 [CLOUDKIT_CLEAN] Total duplicates to delete: \(totalDuplicates)")
-
-                if recordsToDelete.isEmpty {
-                    await MainActor.run {
-                        successAlertMessage = "No duplicates found! Your CloudKit database is clean."
-                        showingSuccessAlert = true
-                        HapticManager.notification(.success)
-                    }
-                    return
-                }
-
-                // Delete duplicates from CloudKit in batches (CloudKit limit is 400 per operation)
-                let batchSize = 400
-                var deletedCount = 0
-
-                for batch in recordsToDelete.chunked(into: batchSize) {
-                    let database = CKContainer.default().privateCloudDatabase
-                    let deleteOperation = CKModifyRecordsOperation(recordsToSave: nil, recordIDsToDelete: batch)
-
-                    deleteOperation.modifyRecordsResultBlock = { result in
-                        switch result {
-                        case .success:
-                            deletedCount += batch.count
-                            print("✅ [CLOUDKIT_CLEAN] Deleted batch of \(batch.count) duplicates")
-                        case .failure(let error):
-                            print("❌ [CLOUDKIT_CLEAN] Failed to delete batch: \(error)")
-                        }
-                    }
-
-                    database.add(deleteOperation)
-
-                    // Wait for operation to complete
-                    try await Task.sleep(nanoseconds: 500_000_000) // 0.5 second delay between batches
-                }
-
-                print("✅ [CLOUDKIT_CLEAN] Deleted \(deletedCount) duplicate items from CloudKit")
-
-                await MainActor.run {
-                    successAlertMessage = "Successfully removed \(deletedCount) duplicate items from CloudKit!\n\nTotal items before: \(allRecords.count)\nDuplicates removed: \(deletedCount)\nUnique items remaining: \(itemGroups.count)"
-                    showingSuccessAlert = true
-                    HapticManager.notification(.success)
-                }
-
-            } catch {
-                print("❌ [CLOUDKIT_CLEAN] Failed to clean CloudKit: \(error)")
-                await MainActor.run {
-                    errorAlertMessage = "Failed to clean CloudKit duplicates: \(error.localizedDescription)"
-                    showingErrorAlert = true
-                    HapticManager.errorOccurred()
-                }
-            }
-        }
+        // CloudKit duplicate cleaning no longer needed
+        errorAlertMessage = "This feature was for CloudKit and is no longer needed with Firebase"
+        showingErrorAlert = true
     }
 
     private func deleteAccountData() async {
         print("🧨 [SETTINGS] User confirmed delete account")
 
-        guard cloudKit.isSignedInToiCloud else {
-            errorAlertMessage = "Not signed in to iCloud. Please sign in before deleting your account data."
-            showingErrorAlert = true
+        guard firebase.isAuthenticated else {
+            await MainActor.run {
+                errorAlertMessage = "Not signed in to Firebase. Please sign in before deleting your account data."
+                showingErrorAlert = true
+            }
             return
         }
 
         do {
-            try await cloudKit.wipeCurrentUserData()
+            // TODO: Implement Firebase account deletion
+            // This should delete all user data from Firestore
             await MainActor.run {
-                successAlertMessage = "Your account data for this app has been deleted from iCloud for this Apple ID. You can now start fresh by adding children and wishlist items again."
-                showingSuccessAlert = true
-                HapticManager.notification(.success)
-            }
-        } catch let ckError as CKError {
-            await MainActor.run {
-                errorAlertMessage = ckError.userFriendlyMessage
+                errorAlertMessage = "Account deletion not yet implemented with Firebase"
                 showingErrorAlert = true
-                HapticManager.errorOccurred()
             }
         } catch {
             await MainActor.run {

@@ -21,16 +21,29 @@ struct GiftSuggestion: Identifiable {
 class XAIService: ObservableObject {
     static let shared = XAIService()
 
-   
-    
-    // Do this:
-    private let apiKey: String = {
-        // Try to get from environment variable first
-        if let key = ProcessInfo.processInfo.environment["XAI_API_KEY"] {
+
+
+    // Optional API key - gracefully degrade if not available
+    private let apiKey: String? = {
+        // Debug: Print all environment variables to help diagnose
+        print("XAIService: Checking for API key...")
+        print("XAIService: Environment has \(ProcessInfo.processInfo.environment.count) variables")
+
+        // Try to get from environment variable first (for Xcode debugging)
+        if let key = ProcessInfo.processInfo.environment["XAI_API_KEY"], !key.isEmpty {
+            print("XAIService: Found API key in environment (length: \(key.count))")
             return key
         }
-        // Fallback - load from a config file that's in .gitignore
-        fatalError("XAI_API_KEY not found in environment")
+
+        // Fallback to Info.plist (for TestFlight/production)
+        if let key = Bundle.main.object(forInfoDictionaryKey: "XAI_API_KEY") as? String, !key.isEmpty {
+            print("XAIService: Found API key in Info.plist (length: \(key.count))")
+            return key
+        }
+
+        print("XAIService: No API key found in environment or Info.plist")
+        // No API key available - features will be disabled
+        return nil
     }()
     
     
@@ -44,6 +57,13 @@ class XAIService: ObservableObject {
 
     // MARK: - Generate Gift Suggestions
     func generateGiftSuggestions(age: Int, interests: [String], sex: String, budget: Double = 100, educationalLevel: Double = 0.5) async -> [GiftSuggestion] {
+        // Check if API key is available
+        guard let apiKey = apiKey else {
+            print("XAIService: API key not configured - suggestions disabled")
+            errorMessage = "AI suggestions require API configuration"
+            return []
+        }
+
         isLoading = true
         errorMessage = nil
 
@@ -210,6 +230,12 @@ class XAIService: ObservableObject {
 
     // MARK: - Clean Product Title
     func cleanProductTitle(_ rawTitle: String) async -> String {
+        // Check if API key is available
+        guard let apiKey = apiKey else {
+            print("XAIService: API key not configured - returning original title")
+            return rawTitle // Return original title if API key not available
+        }
+
         // Create the request
         guard let url = URL(string: apiURL) else {
             print("XAIService: Invalid URL for title cleaning")

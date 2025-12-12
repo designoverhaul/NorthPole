@@ -6,32 +6,22 @@
 //
 
 import SwiftUI
-import CloudKit
 import SwiftData
 
 struct ManageChildrenView: View {
-    @ObservedObject private var cloudKit = CloudKitManager.shared
+    @ObservedObject private var firebase = FirebaseManager.shared
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Query(sort: \Child.name) private var children: [Child]
 
-    @State private var children: [CKChild] = []
     @State private var isLoading = false
     @State private var isAdding = false
     @State private var newChildName = ""
     @State private var showingAddSheet = false
-    @State private var error: CloudKitError?
+    @State private var error: Error?
     @State private var showingError = false
-    @State private var childToDelete: CKChild?
+    @State private var childToDelete: Child?
     @State private var showingDeleteConfirmation = false
-    @State private var currentUserId: UUID = {
-        if let existingId = AppGroupContainer.getCurrentUserId() {
-            return existingId
-        } else {
-            let newId = UUID()
-            AppGroupContainer.saveCurrentUserId(newId)
-            return newId
-        }
-    }()
 
     var body: some View {
         NavigationStack {
@@ -127,25 +117,14 @@ struct ManageChildrenView: View {
     private func loadChildren() async {
         isLoading = true
         do {
-            let records = try await cloudKit.fetchMyChildren()
-            await MainActor.run {
-                children = records.map { CKChild(from: $0) }
-                print("✅ [MANAGE_CHILDREN] Loaded \(children.count) children from CloudKit")
-            }
-        } catch let error as CKError where error.code == .unknownItem {
-            // Record type doesn't exist yet - this is normal on first run
-            print("☁️ [MANAGE_CHILDREN] Child record type not created yet")
-            await MainActor.run {
-                children = []
-            }
+            // Fetch children from Firebase (returns local immediately, syncs in background)
+            _ = try await firebase.fetchMyChildren(context: modelContext)
+            print("✅ [MANAGE_CHILDREN] Loaded children from Firebase")
         } catch {
             print("❌ [MANAGE_CHILDREN] Error loading children: \(error)")
             await MainActor.run {
-                // Don't show error for unknown record type
-                if let ckError = error as? CKError, ckError.code != .unknownItem {
-                    self.error = error as? CloudKitError
-                    showingError = true
-                }
+                self.error = error
+                showingError = true
             }
         }
         await MainActor.run {
@@ -160,24 +139,29 @@ struct ManageChildrenView: View {
         Task { @MainActor in
             do {
                 print("➕ [MANAGE_CHILDREN] Adding child '\(newChildName)'...")
-                let record = try await cloudKit.saveChild(name: newChildName)
-                let newChild = CKChild(from: record)
-                
-                children.append(newChild)
-                children.sort { $0.name < $1.name }
+
+                // Save to Firebase (also saves to SwiftData)
+                let childId = try await firebase.saveChild(name: newChildName)
+
+                // Create local SwiftData child
+                let newChild = Child(
+                    name: newChildName,
+                    parentId: UUID(), // Firebase will determine parent from auth
+                    cloudKitRecordID: childId
+                )
+                modelContext.insert(newChild)
+                try modelContext.save()
 
                 newChildName = ""
-                // Don't dismiss - keep user on the add sheet so they can add more or manually navigate back
                 HapticManager.itemAdded()
-                
-                print("✅ [MANAGE_CHILDREN] Added child '\(newChild.name)' (ID: \(newChild.id))")
-                
+
+                print("✅ [MANAGE_CHILDREN] Added child '\(newChild.name)'")
+
                 // Trigger refresh in other views
-                cloudKit.shouldRefreshChildren.toggle()
-                print("✅ [MANAGE_CHILDREN] Triggered shouldRefreshChildren")
+                firebase.shouldRefreshChildren.toggle()
             } catch {
                 print("❌ [MANAGE_CHILDREN] Error adding child: \(error)")
-                self.error = error as? CloudKitError
+                self.error = error
                 showingError = true
                 HapticManager.errorOccurred()
             }
@@ -185,33 +169,35 @@ struct ManageChildrenView: View {
         }
     }
 
-    private func deleteChild(_ child: CKChild) {
+    private func deleteChild(_ child: Child) {
         print("🗑️ [MANAGE_CHILDREN] Delete button tapped for child '\(child.name)'")
-        
+
         Task { @MainActor in
             do {
-                print("🗑️ [MANAGE_CHILDREN] Deleting child '\(child.name)' (ID: \(child.id)) from CloudKit...")
-                
-                // Delete from CloudKit (this also deletes all their wishlist items)
-                try await cloudKit.deleteChild(child.record.recordID)
-                print("✅ [MANAGE_CHILDREN] Successfully deleted from CloudKit")
-                
-                // Remove from local state
-                children.removeAll { $0.id == child.id }
-                print("✅ [MANAGE_CHILDREN] Removed from local state, now have \(children.count) children")
+                print("🗑️ [MANAGE_CHILDREN] Deleting child '\(child.name)' from Firebase...")
+
+                // Delete from Firebase (this also deletes all their wishlist items)
+                if let firestoreId = child.cloudKitRecordID {
+                    try await firebase.deleteChild(childId: firestoreId)
+                }
+
+                // Delete from local SwiftData
+                modelContext.delete(child)
+                try modelContext.save()
+
+                print("✅ [MANAGE_CHILDREN] Successfully deleted child")
 
                 // Trigger refresh in other views
-                cloudKit.shouldRefreshChildren.toggle()
-                print("✅ [MANAGE_CHILDREN] Triggered refresh")
-                
+                firebase.shouldRefreshChildren.toggle()
+
                 HapticManager.itemDeleted()
             } catch {
-                print("❌ [MANAGE_CHILDREN] CloudKit delete failed: \(error)")
-                
+                print("❌ [MANAGE_CHILDREN] Firebase delete failed: \(error)")
+
                 // Reload children to restore UI if delete failed
                 await loadChildren()
-                
-                self.error = error as? CloudKitError
+
+                self.error = error
                 showingError = true
                 HapticManager.errorOccurred()
             }

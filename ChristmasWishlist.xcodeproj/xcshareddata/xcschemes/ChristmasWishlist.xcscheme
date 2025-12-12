@@ -74,6 +74,13 @@
             ReferencedContainer = "container:ChristmasWishlist.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "XAI_API_KEY"
+            value = "REMOVED_API_KEY"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

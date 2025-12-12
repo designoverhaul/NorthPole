@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import CloudKit
 import UniformTypeIdentifiers
 import UIKit
 
@@ -14,10 +13,10 @@ class ShareViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        print("☁️ ShareViewController: viewDidLoad started (CloudKit version)")
+        print("🎁 ShareViewController: viewDidLoad started (Firebase version)")
 
         let hostingController = UIHostingController(
-            rootView: CloudKitShareExtensionView(
+            rootView: ShareExtensionView(
                 extensionContext: self.extensionContext
             )
         )
@@ -29,6 +28,6 @@ class ShareViewController: UIViewController {
         hostingController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         hostingController.didMove(toParent: self)
 
-        print("☁️ ShareViewController: Setup completed successfully!")
+        print("🎁 ShareViewController: Setup completed successfully!")
     }
 }

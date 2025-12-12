@@ -6,6 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		937DDDC02EE9B8960036CD5F /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 937DDDBF2EE9B8960036CD5F /* FirebaseAuth */; };
+		937DDDC22EE9B8960036CD5F /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 937DDDC12EE9B8960036CD5F /* FirebaseFirestore */; };
+		937DDDC42EE9B8960036CD5F /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 937DDDC32EE9B8960036CD5F /* FirebaseMessaging */; };
+		937DDDC62EE9B8960036CD5F /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 937DDDC52EE9B8960036CD5F /* FirebaseStorage */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		9341EFE62ECA1A2A00E98CEC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -65,6 +72,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				937DDDC42EE9B8960036CD5F /* FirebaseMessaging in Frameworks */,
+				937DDDC62EE9B8960036CD5F /* FirebaseStorage in Frameworks */,
+				937DDDC02EE9B8960036CD5F /* FirebaseAuth in Frameworks */,
+				937DDDC22EE9B8960036CD5F /* FirebaseFirestore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -125,6 +136,10 @@
 			);
 			name = ChristmasWishlist;
 			packageProductDependencies = (
+				937DDDBF2EE9B8960036CD5F /* FirebaseAuth */,
+				937DDDC12EE9B8960036CD5F /* FirebaseFirestore */,
+				937DDDC32EE9B8960036CD5F /* FirebaseMessaging */,
+				937DDDC52EE9B8960036CD5F /* FirebaseStorage */,
 			);
 			productName = ChristmasWishlist;
 			productReference = 9341EFD82ECA1A2800E98CEC /* ChristmasWishlist.app */;
@@ -208,6 +223,9 @@
 			);
 			mainGroup = 9341EFCF2ECA1A2800E98CEC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				937DDDBE2EE9B8960036CD5F /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9341EFD92ECA1A2800E98CEC /* Products */;
 			projectDirPath = "";
@@ -410,7 +428,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ChristmasWishlist/ChristmasWishlist.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 8Z26HLRJ65;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -427,7 +445,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 7;
+				MARKETING_VERSION = 11;
 				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlist;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -447,7 +465,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = ChristmasWishlist/ChristmasWishlist.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 8Z26HLRJ65;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -464,7 +482,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 7;
+				MARKETING_VERSION = 11;
 				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlist;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -605,6 +623,40 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		937DDDBE2EE9B8960036CD5F /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		937DDDBF2EE9B8960036CD5F /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 937DDDBE2EE9B8960036CD5F /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		937DDDC12EE9B8960036CD5F /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 937DDDBE2EE9B8960036CD5F /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		937DDDC32EE9B8960036CD5F /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 937DDDBE2EE9B8960036CD5F /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+		937DDDC52EE9B8960036CD5F /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 937DDDBE2EE9B8960036CD5F /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 9341EFD02ECA1A2800E98CEC /* Project object */;
 }

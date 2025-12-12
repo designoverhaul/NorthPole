@@ -165,17 +165,30 @@ struct ShareExtensionView: View {
 
     private func loadCurrentUser() {
         print("🎁 ShareExtensionView: loadCurrentUser started")
-        // Load user ID from shared UserDefaults (App Group)
-        if let userId = AppGroupContainer.getCurrentUserId() {
-            print("🎁 ShareExtensionView: Found existing user ID: \(userId)")
-            currentUserId = userId
-        } else {
-            // Create new user ID if none exists
-            let newId = UUID()
-            print("🎁 ShareExtensionView: Creating new user ID: \(newId)")
-            AppGroupContainer.saveCurrentUserId(newId)
-            currentUserId = newId
+
+        // IMPORTANT: Share extensions can't reliably determine the Firebase user
+        // We use a placeholder UUID here, and the main app will reassign the correct owner
+        // when it syncs items from SwiftData to Firebase
+
+        // Try to get ANY saved user ID (from any Firebase account)
+        // This is a best-effort approach for the share extension
+        if let defaults = AppGroupContainer.sharedDefaults {
+            let allKeys = defaults.dictionaryRepresentation().keys
+            if let userIdKey = allKeys.first(where: { $0.hasPrefix("currentUserId_") }),
+               let userIdString = defaults.string(forKey: userIdKey),
+               let userId = UUID(uuidString: userIdString) {
+                print("🎁 ShareExtensionView: Found user ID from key: \(userIdKey)")
+                currentUserId = userId
+                return
+            }
         }
+
+        // If no user ID found, use a placeholder
+        // The main app will correct this when it syncs
+        let placeholderId = UUID()
+        print("🎁 ShareExtensionView: Using placeholder user ID: \(placeholderId)")
+        print("⚠️ ShareExtensionView: Main app will assign correct owner during sync")
+        currentUserId = placeholderId
     }
 
     private func loadSharedContent() {
