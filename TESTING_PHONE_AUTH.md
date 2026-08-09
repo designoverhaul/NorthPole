@@ -132,3 +132,7 @@ If you encounter issues:
 2. Verify `GoogleService-Info.plist` is in the project
 3. Check Xcode console for error messages
 4. Ensure you're using the correct verification code: `123456`
+
+
+
+

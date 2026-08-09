@@ -8,6 +8,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
+import SwiftData
 
 class ShareViewController: UIViewController {
     override func viewDidLoad() {
@@ -19,6 +20,7 @@ class ShareViewController: UIViewController {
             rootView: ShareExtensionView(
                 extensionContext: self.extensionContext
             )
+            .modelContainer(AppGroupContainer.modelContainer)
         )
 
         print("☁️ ShareViewController: Adding hosting controller...")

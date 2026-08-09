@@ -6,9 +6,11 @@
 //
 //  ⚠️ IMPORTANT: This view has multiple keyboard dismissal methods for the number pad
 //  The number pad doesn't have a built-in dismiss button, so we provide:
-//  1. Keyboard toolbar "Done" button (above keyboard)
+//  1. Keyboard toolbar "Done" button (above keyboard) — must stay unconditional,
+//     `.keyboard` placement already only renders while a keyboard is on screen
 //  2. Scroll-to-dismiss functionality
-//  3. Tap-background-to-dismiss
+//  3. Tap-anywhere-to-dismiss (background and scroll content)
+//  4. Touching any other control (sliders, gender menu, interest chips) dismisses it
 //  DO NOT REMOVE these methods - they are essential for good UX
 
 import SwiftUI
@@ -30,7 +32,8 @@ struct AskSantaView: View {
     @State private var hasSearched = false
     @State private var snowflakeRotation: Double = 0
 
-    // Available interest categories
+    // Available interest categories. The raw values double as the strings sent to
+    // xAI, so they stay in English; the UI renders them through the string catalog.
     private let interests = [
         "Camping & Outdoors", "Lego", "Videogames", "Cooking", "Grilling", "Smart Home",
         "Reading & Books", "Sports & Fitness", "Arts & Crafts",
@@ -39,10 +42,16 @@ struct AskSantaView: View {
         "Stuff for Dogs", "Collectibles & Memorabilia", "Coffee & Tea"
     ]
 
+    private let maxInterests = 8
+
     enum Sex: String, CaseIterable {
         case male = "Male"
         case female = "Female"
         case either = "Either"
+
+        var label: LocalizedStringKey {
+            LocalizedStringKey(rawValue)
+        }
     }
 
     var body: some View {
@@ -52,9 +61,7 @@ struct AskSantaView: View {
                 // DO NOT REMOVE - Allows users to dismiss by tapping outside the text field
                 Color.creamBackground.ignoresSafeArea()
                     .onTapGesture {
-                        withAnimation {
-                            isAgeFieldFocused = false
-                        }
+                        dismissKeyboard()
                     }
 
                 ScrollView {
@@ -86,10 +93,17 @@ struct AskSantaView: View {
                         }
                     }
                     .padding(Spacing.lg)
+                    // ⚠️ CRITICAL: Tap anywhere in the form to dismiss the number pad.
+                    // The ScrollView covers the background above, so the background's
+                    // tap gesture alone is unreachable for most of the screen.
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismissKeyboard()
+                    }
                 }
                 // ⚠️ CRITICAL: Enable scroll-to-dismiss keyboard
                 // DO NOT REMOVE - Allows users to dismiss keyboard by scrolling
-                .scrollDismissesKeyboard(.interactively)
+                .scrollDismissesKeyboard(.immediately)
             }
             .navigationTitle("")
             .goldTitle("Ask Santa")
@@ -118,25 +132,26 @@ struct AskSantaView: View {
 
                 // ⚠️ CRITICAL: Done button above keyboard (iOS standard position)
                 // DO NOT REMOVE - Primary method to dismiss number pad
-                if isAgeFieldFocused {
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button(action: {
-                            withAnimation {
-                                isAgeFieldFocused = false
-                            }
-                            HapticManager.buttonTapped()
-                        }) {
-                            Text("Done")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Color.forestGreen)
-                        }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button(action: {
+                        HapticManager.buttonTapped()
+                        dismissKeyboard()
+                    }) {
+                        Text("Done")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color.forestGreen)
                     }
                 }
             }
             .toolbarBackground(Color.creamBackground, for: .navigationBar)
             .toolbarBackground(hasSearched && !suggestions.isEmpty ? .visible : .hidden, for: .navigationBar)
         }
+    }
+
+    /// Year without digit grouping, so it never renders as "2,026".
+    private var currentYear: String {
+        Calendar.current.component(.year, from: Date()).formatted(.number.grouping(.never))
     }
 
     // MARK: - Santa Header
@@ -148,7 +163,7 @@ struct AskSantaView: View {
                     .scaledToFit()
                     .frame(maxWidth: geometry.size.width * 0.6)
 
-                Text("I know what people want in 2025! ")
+                Text("I know what people want in \(currentYear)!")
                     .font(.custom("Caveat", size: 27))
                     .foregroundStyle(Color.warmBlack)
                     .multilineTextAlignment(.center)
@@ -194,11 +209,12 @@ struct AskSantaView: View {
                     Menu {
                         ForEach(Sex.allCases, id: \.self) { sex in
                             Button(action: {
+                                dismissKeyboard()
                                 selectedSex = sex
                                 HapticManager.selection()
                             }) {
                                 HStack {
-                                    Text(sex.rawValue)
+                                    Text(sex.label)
                                     if selectedSex == sex {
                                         Image(systemName: "checkmark")
                                     }
@@ -207,7 +223,7 @@ struct AskSantaView: View {
                         }
                     } label: {
                         HStack {
-                            Text(selectedSex.rawValue)
+                            Text(selectedSex.label)
                                 .foregroundStyle(Color.warmBlack)
                             Spacer()
                             Image(systemName: "chevron.up.chevron.down")
@@ -235,23 +251,24 @@ struct AskSantaView: View {
 
                     Spacer()
 
-                    Text("$\(Int(budget))")
+                    Text(budgetText(budget))
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundStyle(Color.forestGreen)
                 }
 
                 HStack(spacing: Spacing.sm) {
-                    Text("$25")
+                    Text(budgetText(25))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.warmGray)
 
                     Slider(value: $budget, in: 25...250, step: 5)
                         .tint(Color.forestGreen)
                         .onChange(of: budget) { _, _ in
+                            dismissKeyboard()
                             HapticManager.selection()
                         }
 
-                    Text("$250")
+                    Text(budgetText(250))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.warmGray)
                 }
@@ -286,6 +303,7 @@ struct AskSantaView: View {
                     Slider(value: $educationalLevel, in: 0...1, step: 0.25)
                         .tint(Color.forestGreen)
                         .onChange(of: educationalLevel) { _, _ in
+                            dismissKeyboard()
                             HapticManager.selection()
                         }
 
@@ -311,10 +329,12 @@ struct AskSantaView: View {
 
                     Spacer()
 
-                    Text("\(selectedInterests.count)/3")
+                    Text("\(selectedInterests.count)/\(maxInterests)")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundStyle(selectedInterests.count >= 3 ? Color.forestGreen : Color.warmGray)
+                        .foregroundStyle(selectedInterests.count >= maxInterests ? Color.forestGreen : Color.warmGray)
+                        .contentTransition(.numericText())
                 }
+                .animation(.easeInOut(duration: 0.2), value: selectedInterests.count)
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: Spacing.sm) {
                     ForEach(interests, id: \.self) { interest in
@@ -376,10 +396,7 @@ struct AskSantaView: View {
                 .onDisappear {
                     snowflakeRotation = 0
                 }
-
-            Text("Santa's elves are searching...")
-                .font(.bodyLarge)
-                .foregroundStyle(Color.warmGray)
+                .accessibilityLabel("Searching for gift ideas")
         }
         .frame(maxWidth: .infinity)
         .padding(Spacing.xxl)
@@ -388,17 +405,30 @@ struct AskSantaView: View {
     // MARK: - Empty State View
     private var emptyStateView: some View {
         VStack(spacing: Spacing.md) {
-            Image(systemName: "questionmark.circle")
+            Image(systemName: xaiService.errorMessage == nil ? "questionmark.circle" : "exclamationmark.triangle")
                 .font(.system(size: 48))
                 .foregroundStyle(Color.warmGray)
 
-            Text("No gift ideas found")
-                .font(.headingMedium)
-                .foregroundStyle(Color.warmBlack)
+            Group {
+                if let error = xaiService.errorMessage {
+                    Text("Santa couldn't reach the workshop")
+                        .font(.headingMedium)
+                        .foregroundStyle(Color.warmBlack)
 
-            Text("Try adjusting your search criteria")
-                .font(.bodyMedium)
-                .foregroundStyle(Color.warmGray)
+                    Text(error)
+                        .font(.bodyMedium)
+                        .foregroundStyle(Color.warmGray)
+                } else {
+                    Text("No gift ideas found")
+                        .font(.headingMedium)
+                        .foregroundStyle(Color.warmBlack)
+
+                    Text("Try adjusting your search criteria")
+                        .font(.bodyMedium)
+                        .foregroundStyle(Color.warmGray)
+                }
+            }
+            .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(Spacing.xxl)
@@ -430,7 +460,7 @@ struct AskSantaView: View {
         return true
     }
 
-    private var educationalLevelLabel: String {
+    private var educationalLevelLabel: LocalizedStringKey {
         switch educationalLevel {
         case 0.0:
             return "Fun & Entertainment"
@@ -447,15 +477,26 @@ struct AskSantaView: View {
         }
     }
 
+    /// Budget is always a USD amount; `.currency` only places the symbol per locale.
+    private func budgetText(_ amount: Double) -> String {
+        amount.formatted(.currency(code: "USD").precision(.fractionLength(0)))
+    }
+
+    private func dismissKeyboard() {
+        guard isAgeFieldFocused else { return }
+        isAgeFieldFocused = false
+    }
+
     private func toggleInterest(_ interest: String) {
+        dismissKeyboard()
+
         if selectedInterests.contains(interest) {
             selectedInterests.remove(interest)
             HapticManager.selection()
-        } else if selectedInterests.count < 3 {
+        } else if selectedInterests.count < maxInterests {
             selectedInterests.insert(interest)
             HapticManager.selection()
         } else {
-            // Already have 3 interests selected - can't add more
             HapticManager.errorOccurred()
         }
     }
@@ -464,14 +505,20 @@ struct AskSantaView: View {
         guard let ageValue = Int(age) else { return }
 
         HapticManager.buttonTapped()
+        dismissKeyboard()
 
+        // Nothing may change until the paywall lets the search through, otherwise the form
+        // would be swapped for an empty results state behind the paywall.
+        SuperwallManager.shared.requestAskSantaSearch(isRefining: !suggestions.isEmpty) {
+            runSearch(age: ageValue)
+        }
+    }
+
+    private func runSearch(age ageValue: Int) {
         // If we already have suggestions, we're finding more (appending)
         let isAppending = !suggestions.isEmpty
 
         hasSearched = true
-
-        // Dismiss keyboard
-        isAgeFieldFocused = false
 
         Task {
             let newSuggestions = await xaiService.generateGiftSuggestions(
@@ -501,7 +548,7 @@ struct InterestChip: View {
 
     var body: some View {
         Button(action: action) {
-            Text(interest)
+            Text(LocalizedStringKey(interest))
                 .font(.bodySmall)
                 .fontWeight(.medium)
                 .foregroundStyle(isSelected ? .white : Color.forestGreen)

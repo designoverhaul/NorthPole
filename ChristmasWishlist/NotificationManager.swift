@@ -45,8 +45,9 @@ class NotificationManager {
         print("📲 [LOCAL_NOTIFICATION] Attempting to send notification for item: '\(itemName)'")
 
         // Check if notifications are enabled in settings
-        // Default to true if never set (matches @AppStorage default in SettingsView)
-        let notificationsEnabled = UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true
+        // Default to false if never set (matches @AppStorage default in SettingsView — the
+        // setting is paywalled, so it stays off until the user unlocks it)
+        let notificationsEnabled = UserDefaults.standard.bool(forKey: "notificationsEnabled")
         print("⚙️ [LOCAL_NOTIFICATION] Settings: notificationsEnabled = \(notificationsEnabled)")
 
         guard notificationsEnabled else {
@@ -66,8 +67,8 @@ class NotificationManager {
         }
 
         let content = UNMutableNotificationContent()
-        content.title = "Gift Purchased!"
-        content.body = "\(friendName) marked \"\(itemName)\" as purchased from your wishlist"
+        content.title = String(localized: "Gift Purchased!")
+        content.body = String(localized: "🎁 Someone purchased \(itemName) for you!")
         content.sound = .default
         content.badge = 1
 

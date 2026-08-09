@@ -49,10 +49,10 @@ class FirebaseAuthManager: ObservableObject {
 
     // MARK: - Phone Number Formatting
 
-    /// Normalize phone number to digits only (for Firestore document IDs)
-    /// Example: "(205)-292-9663" → "2052929663"
+    /// Normalize phone number to canonical digits-only US form (for Firestore document IDs)
+    /// Example: "(205)-292-9663" → "12052929663"
     func normalizePhoneNumber(_ phone: String) -> String {
-        return phone.filter { $0.isNumber }
+        PhoneNumber.normalize(phone)
     }
 
     /// Format phone number for Firebase Auth (E.164 format)
@@ -142,7 +142,7 @@ class FirebaseAuthManager: ObservableObject {
                 userInfo: [NSLocalizedDescriptionKey: "Invalid phone number format. Expected E.164 format (e.g., +12055551001)"]
             )
             logger.error("❌ [AUTH] Invalid formatted phone: \(formattedPhone)")
-            authError = "Invalid phone number format. Please enter a valid 10-digit US phone number."
+            authError = String(localized: "Invalid phone number format. Please enter a valid 10-digit US phone number.")
             throw error
         }
 
@@ -165,7 +165,7 @@ class FirebaseAuthManager: ObservableObject {
             logger.error("❌ [AUTH] Failed to send verification code: \(error.localizedDescription)")
             logger.error("❌ [AUTH] Input phone: \(phoneNumber)")
             logger.error("❌ [AUTH] Formatted phone: \(formattedPhone)")
-            authError = "Failed to send verification code: \(error.localizedDescription)"
+            authError = String(localized: "Failed to send verification code: \(error.localizedDescription)")
             throw error
         }
     }
@@ -212,7 +212,7 @@ class FirebaseAuthManager: ObservableObject {
         guard let verificationID = verificationID else {
             let error = NSError(domain: "FirebaseAuth", code: -1, userInfo: [NSLocalizedDescriptionKey: "No verification ID found"])
             logger.error("❌ [AUTH] No verification ID")
-            authError = "No verification ID. Please request a new code."
+            authError = String(localized: "No verification ID. Please request a new code.")
             throw error
         }
 
@@ -231,7 +231,7 @@ class FirebaseAuthManager: ObservableObject {
 
         } catch {
             logger.error("❌ [AUTH] Failed to verify code: \(error.localizedDescription)")
-            authError = "Invalid verification code. Please try again."
+            authError = String(localized: "Invalid verification code. Please try again.")
             throw error
         }
     }
@@ -239,6 +239,18 @@ class FirebaseAuthManager: ObservableObject {
     /// Sign out current user
     func signOut() throws {
         logger.info("👋 [AUTH] Signing out...")
+
+        // Remove FCM token from Firestore before signing out (best effort)
+        if let token = UserDefaults.standard.string(forKey: "fcmToken") {
+            Task {
+                do {
+                    try await FirebaseManager.shared.removeFCMToken(token)
+                    logger.info("✅ [AUTH] FCM token removed from Firestore during sign out")
+                } catch {
+                    logger.error("⚠️ [AUTH] Failed to remove FCM token: \(error.localizedDescription)")
+                }
+            }
+        }
 
         do {
             try Auth.auth().signOut()

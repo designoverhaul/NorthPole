@@ -2,8 +2,6 @@
 //  AppGroupContainer.swift
 //  ChristmasWishlist
 //
-//  Created by Claude Code
-//
 
 import Foundation
 import SwiftData
@@ -15,7 +13,7 @@ enum AppGroupContainer {
         let schema = Schema([
             WishlistItem.self,
             Friend.self,
-            User.self
+            Child.self
         ])
 
         let modelConfiguration = ModelConfiguration(
@@ -25,10 +23,12 @@ enum AppGroupContainer {
         )
 
         do {
-            return try ModelContainer(
+            let container = try ModelContainer(
                 for: schema,
                 configurations: [modelConfiguration]
             )
+            container.mainContext.autosaveEnabled = true
+            return container
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
@@ -36,20 +36,5 @@ enum AppGroupContainer {
 
     static var sharedDefaults: UserDefaults? {
         UserDefaults(suiteName: identifier)
-    }
-
-    // Save current user ID for share extension access
-    // Note: These functions are legacy and may not be used with Firebase migration
-    static func saveCurrentUserId(_ userId: UUID, forCloudKitUser cloudKitRecordID: String) {
-        let key = "currentUserId_\(cloudKitRecordID)"
-        sharedDefaults?.set(userId.uuidString, forKey: key)
-    }
-
-    static func getCurrentUserId(forCloudKitUser cloudKitRecordID: String) -> UUID? {
-        let key = "currentUserId_\(cloudKitRecordID)"
-        guard let userIdString = sharedDefaults?.string(forKey: key) else {
-            return nil
-        }
-        return UUID(uuidString: userIdString)
     }
 }

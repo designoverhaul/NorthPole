@@ -164,31 +164,10 @@ struct ShareExtensionView: View {
     }
 
     private func loadCurrentUser() {
-        print("🎁 ShareExtensionView: loadCurrentUser started")
-
-        // IMPORTANT: Share extensions can't reliably determine the Firebase user
-        // We use a placeholder UUID here, and the main app will reassign the correct owner
-        // when it syncs items from SwiftData to Firebase
-
-        // Try to get ANY saved user ID (from any Firebase account)
-        // This is a best-effort approach for the share extension
-        if let defaults = AppGroupContainer.sharedDefaults {
-            let allKeys = defaults.dictionaryRepresentation().keys
-            if let userIdKey = allKeys.first(where: { $0.hasPrefix("currentUserId_") }),
-               let userIdString = defaults.string(forKey: userIdKey),
-               let userId = UUID(uuidString: userIdString) {
-                print("🎁 ShareExtensionView: Found user ID from key: \(userIdKey)")
-                currentUserId = userId
-                return
-            }
-        }
-
-        // If no user ID found, use a placeholder
-        // The main app will correct this when it syncs
-        let placeholderId = UUID()
-        print("🎁 ShareExtensionView: Using placeholder user ID: \(placeholderId)")
-        print("⚠️ ShareExtensionView: Main app will assign correct owner during sync")
-        currentUserId = placeholderId
+        // Share extension cannot use Firebase Auth reliably.
+        // Items are saved into the shared App Group SwiftData store and uploaded
+        // by the main app on next launch via uploadUnsyncedLocalItems.
+        currentUserId = UUID()
     }
 
     private func loadSharedContent() {
@@ -315,7 +294,10 @@ struct ShareExtensionView: View {
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             url: url.isEmpty ? nil : url,
             itemDescription: description.isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines),
-            ownerId: currentUserId
+            ownerId: currentUserId,
+            imageData: imageData,
+            isOwnedByCurrentUser: true,
+            lastSyncedAt: nil
         )
 
         modelContext.insert(newItem)

@@ -29,19 +29,27 @@ class XAIService: ObservableObject {
         print("XAIService: Checking for API key...")
         print("XAIService: Environment has \(ProcessInfo.processInfo.environment.count) variables")
 
+        // Helper function to check if a key is a valid API key (not a placeholder)
+        func isValidAPIKey(_ key: String) -> Bool {
+            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Check for common placeholder values
+            let placeholders = ["REMOVED_API_KEY", "YOUR_API_KEY_HERE", "API_KEY", "REPLACE_ME", ""]
+            return !trimmed.isEmpty && !placeholders.contains(trimmed)
+        }
+
         // Try to get from environment variable first (for Xcode debugging)
-        if let key = ProcessInfo.processInfo.environment["XAI_API_KEY"], !key.isEmpty {
+        if let key = ProcessInfo.processInfo.environment["XAI_API_KEY"], isValidAPIKey(key) {
             print("XAIService: Found API key in environment (length: \(key.count))")
             return key
         }
 
         // Fallback to Info.plist (for TestFlight/production)
-        if let key = Bundle.main.object(forInfoDictionaryKey: "XAI_API_KEY") as? String, !key.isEmpty {
+        if let key = Bundle.main.object(forInfoDictionaryKey: "XAI_API_KEY") as? String, isValidAPIKey(key) {
             print("XAIService: Found API key in Info.plist (length: \(key.count))")
             return key
         }
 
-        print("XAIService: No API key found in environment or Info.plist")
+        print("XAIService: No valid API key found in environment or Info.plist")
         // No API key available - features will be disabled
         return nil
     }()
@@ -49,6 +57,18 @@ class XAIService: ObservableObject {
     
     
     private let apiURL = "https://api.x.ai/v1/chat/completions"
+    private let model = "grok-4.5"
+
+    /// English name of the language the UI is currently running in, e.g. "French".
+    /// Used to ask the model for prose in the reader's language.
+    private var responseLanguage: String {
+        let locale = Locale.current
+        guard let code = locale.language.languageCode?.identifier,
+              let name = Locale(identifier: "en_US").localizedString(forLanguageCode: code) else {
+            return "English"
+        }
+        return name
+    }
 
     @Published var isLoading = false
     @Published var errorMessage: String?
@@ -60,7 +80,7 @@ class XAIService: ObservableObject {
         // Check if API key is available
         guard let apiKey = apiKey else {
             print("XAIService: API key not configured - suggestions disabled")
-            errorMessage = "AI suggestions require API configuration"
+            errorMessage = String(localized: "AI suggestions require API configuration")
             return []
         }
 
@@ -102,6 +122,8 @@ class XAIService: ObservableObject {
         - You are not limited to the interest categories - suggest any appropriate real products
         - Respect the educational preference specified above
         - Note the budget above. If it's high you may wanna look for a higher priced items.
+        - Write every description in \(responseLanguage). Keep product names in their
+          original brand spelling — do not translate them.
 
         For each gift, provide:
         1. The gift name (should be a real product name)
@@ -122,7 +144,7 @@ class XAIService: ObservableObject {
         // Create the request
         guard let url = URL(string: apiURL) else {
             print("XAIService: Invalid URL")
-            errorMessage = "Invalid API URL"
+            errorMessage = String(localized: "Invalid API URL")
             return []
         }
 
@@ -130,14 +152,17 @@ class XAIService: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 30
+        // grok-4.5 reasons before answering. At the default effort it regularly spends
+        // 45-80s on this prompt, which blows past any sane client timeout, so the
+        // reasoning budget is capped explicitly (~15s) rather than by raising the timeout.
+        request.timeoutInterval = 60
 
         let requestBody: [String: Any] = [
-            "model": "grok-4-fast-non-reasoning-latest",
+            "model": model,
             "messages": [
                 [
                     "role": "system",
-                    "content": "You are a helpful gift advisor that provides creative gift suggestions in JSON format."
+                    "content": "You are a helpful gift advisor that provides creative gift suggestions in JSON format. Write all prose in \(responseLanguage)."
                 ],
                 [
                     "role": "user",
@@ -145,7 +170,8 @@ class XAIService: ObservableObject {
                 ]
             ],
             "temperature": 0.8,
-            "max_tokens": 2000
+            "max_tokens": 2000,
+            "reasoning_effort": "low"
         ]
 
         do {
@@ -160,7 +186,7 @@ class XAIService: ObservableObject {
                 if httpResponse.statusCode != 200 {
                     let errorText = String(data: data, encoding: .utf8) ?? "Unknown error"
                     print("XAIService: API Error: \(errorText)")
-                    errorMessage = "API returned error code \(httpResponse.statusCode)"
+                    errorMessage = String(localized: "API returned error code \(httpResponse.statusCode)")
                     return []
                 }
             }
@@ -173,7 +199,7 @@ class XAIService: ObservableObject {
                   let message = firstChoice["message"] as? [String: Any],
                   let content = message["content"] as? String else {
                 print("XAIService: Failed to parse API response structure")
-                errorMessage = "Failed to parse API response"
+                errorMessage = String(localized: "Failed to parse API response")
                 return []
             }
 
@@ -182,6 +208,11 @@ class XAIService: ObservableObject {
             // Parse the JSON array from the content
             let suggestions = try parseGiftSuggestions(from: content)
             print("XAIService: Successfully parsed \(suggestions.count) suggestions")
+
+            if suggestions.isEmpty {
+                errorMessage = String(localized: "Santa couldn't read the reply. Please try again.")
+            }
+
             return suggestions
 
         } catch {
@@ -193,18 +224,16 @@ class XAIService: ObservableObject {
 
     // MARK: - Parse Gift Suggestions
     private func parseGiftSuggestions(from content: String) throws -> [GiftSuggestion] {
-        // Clean up the content - sometimes AI adds markdown code blocks
-        var cleanContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Remove markdown code blocks if present
-        if cleanContent.hasPrefix("```json") {
-            cleanContent = cleanContent.replacingOccurrences(of: "```json", with: "")
-            cleanContent = cleanContent.replacingOccurrences(of: "```", with: "")
-            cleanContent = cleanContent.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else if cleanContent.hasPrefix("```") {
-            cleanContent = cleanContent.replacingOccurrences(of: "```", with: "")
-            cleanContent = cleanContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The model is asked for a bare JSON array, but it often wraps the array in a
+        // markdown fence and sometimes adds a lead-in sentence. Slice out the array
+        // itself instead of trusting the response to start with it.
+        guard let start = content.firstIndex(of: "["),
+              let end = content.lastIndex(of: "]"),
+              start < end else {
+            throw NSError(domain: "XAIService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Response did not contain a JSON array"])
         }
+
+        let cleanContent = String(content[start...end])
 
         guard let jsonData = cleanContent.data(using: .utf8) else {
             throw NSError(domain: "XAIService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to convert content to data"])
@@ -246,7 +275,7 @@ class XAIService: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 10
+        request.timeoutInterval = 30
 
         let prompt = """
         Clean up this product title to make it SHORT and concise. Aggressively remove unnecessary information like:
@@ -261,12 +290,13 @@ class XAIService: ObservableObject {
         - Color/size variations (unless it's the product name itself)
 
         Focus on the CORE product name only. Keep it under 40 characters. Just return the cleaned title, nothing else.
+        Keep the title in its original language — do not translate it.
 
         Original title: \(rawTitle)
         """
 
         let requestBody: [String: Any] = [
-            "model": "grok-4-fast-non-reasoning-latest",
+            "model": model,
             "messages": [
                 [
                     "role": "system",
@@ -278,7 +308,8 @@ class XAIService: ObservableObject {
                 ]
             ],
             "temperature": 0.3,
-            "max_tokens": 100
+            "max_tokens": 100,
+            "reasoning_effort": "low"
         ]
 
         do {

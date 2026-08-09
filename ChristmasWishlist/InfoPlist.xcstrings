@@ -1,0 +1,77 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "comment" : "Bundle display name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "North Pole"
+          }
+        }
+      }
+    },
+    "CFBundleName" : {
+      "comment" : "Bundle name",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "ChristmasWishlist"
+          }
+        }
+      }
+    },
+    "NSContactsUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wir benötigen Zugriff auf deine Kontakte, um dir beim Hinzufügen von Freunden zu deiner Wunschliste zu helfen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We need access to your contacts to help you add friends to your wishlist"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Necesitamos acceder a tus contactos para ayudarte a añadir amigos a tu lista de deseos."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nous avons besoin d’accéder à vos contacts pour vous aider à ajouter des amis à votre liste de souhaits."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ci serve l’accesso ai tuoi contatti per aiutarti ad aggiungere amici alla tua lista dei desideri."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "友だちをウィッシュリストに追加できるように、連絡先へのアクセスを許可してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Precisamos acessar seus contatos para ajudar você a adicionar amigos à sua lista de desejos."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

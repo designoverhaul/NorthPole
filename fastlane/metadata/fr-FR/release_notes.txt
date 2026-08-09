@@ -1,0 +1,6 @@
+North Pole parle maintenant votre langue : toute l'application, y compris les idées du Père Noël, est disponible en espagnol, français, allemand, italien, portugais et japonais.
+
+• Cochez les cadeaux que vous avez déjà achetés vous-même, séparément de ceux réservés par vos proches
+• Le Père Noël répond beaucoup plus vite, avec des idées plus précises et vraiment disponibles
+• Nouvelle barre d'onglets et quelques finitions supplémentaires
+• Corrections : ajout d'amis depuis les contacts et réservations qui pouvaient disparaître après modification d'une liste

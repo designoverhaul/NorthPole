@@ -159,6 +159,31 @@ struct PrimaryButtonStyle: ButtonStyle {
     }
 }
 
+// MARK: - Gold Button Style
+/// Full-width capsule sibling of `FloatingActionButton` — same gold gradient,
+/// shadow and press spring, so gold actions read as one family.
+struct GoldButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 17, weight: .semibold, design: .rounded))
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Spacing.md)
+            .background(
+                Capsule().fill(
+                    LinearGradient(
+                        colors: [Color.gold, Color.goldLight],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            )
+            .shadow(color: Color.gold.opacity(0.4), radius: 12, x: 0, y: 6)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.5), value: configuration.isPressed)
+    }
+}
+
 // MARK: - Secondary Button Style
 struct SecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -251,7 +276,8 @@ struct WishlistItemRow: View {
     let giftIndex: Int? // Index among purchased items (0-based) for cycling through gifts
     let showSparkle: Bool
     let onSparkleComplete: () -> Void
-    
+    @AppStorage("showPurchasedItems") private var showPurchasedItems = false
+
     init(
         item: WishlistItem,
         showPurchaseButton: Bool,
@@ -273,11 +299,16 @@ struct WishlistItemRow: View {
     var body: some View {
         HStack(spacing: Spacing.md) {
             // Photo on the left (or spacer to maintain alignment)
-            if item.imageData != nil || (item.isPurchased && !showPurchaseButton) {
+            // Own/child list (!showPurchaseButton): items the owner checked off themselves
+            // always wrap into a gift; friend claims only wrap when showPurchasedItems is ON
+            // so friends' purchases stay secret by default.
+            let visiblyPurchased = item.purchasedByOwner || (showPurchasedItems && item.isPurchased)
+            let shouldShowAsGift = visiblyPurchased && !showPurchaseButton
+            if item.imageData != nil || shouldShowAsGift {
                 ZStack(alignment: .center) {
                     WishlistItemPhoto(
                         imageData: item.imageData,
-                        isPurchased: item.isPurchased && !showPurchaseButton,
+                        isPurchased: shouldShowAsGift,
                         itemId: item.id.uuidString,
                         giftIndex: giftIndex
                     )
@@ -313,7 +344,7 @@ struct WishlistItemRow: View {
                     .foregroundColor(item.isPurchased ? .successGreen : .warmGrayLight)
                 }
                 .buttonStyle(PlainButtonStyle())
-            } else if item.isPurchased && item.imageData == nil {
+            } else if (item.purchasedByOwner || (showPurchasedItems && item.isPurchased)) && item.imageData == nil {
                 // Show non-interactive checkmark for user's own purchased items (only if no photo)
                 Image(systemName: "checkmark")
                     .font(.system(size: 20, weight: .semibold))
@@ -381,7 +412,7 @@ struct FriendRow: View {
                             .foregroundColor(.gold)
 
                         if let count = itemCount {
-                            Text("\(count) \(count == 1 ? "item" : "items")")
+                            Text("\(count) items")
                                 .font(.caption)
                                 .foregroundColor(.warmGray)
                         } else {
@@ -464,7 +495,7 @@ struct ChildRow: View {
                         .foregroundColor(.gold)
 
                     if let count = itemCount {
-                        Text("\(count) \(count == 1 ? "item" : "items")")
+                        Text("\(count) items")
                             .font(.caption)
                             .foregroundColor(.warmGray)
                     } else {
@@ -491,10 +522,10 @@ struct ChildRow: View {
 // MARK: - Snowflake Loading View
 
 struct SnowflakeLoadingView: View {
-    let message: String?
+    let message: LocalizedStringKey?
     @State private var isRotating = false
 
-    init(_ message: String? = nil) {
+    init(_ message: LocalizedStringKey? = nil) {
         self.message = message
     }
 

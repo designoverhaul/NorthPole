@@ -8,23 +8,38 @@
 import SwiftUI
 import SwiftData
 
+/// Payload for `.sheet(item:)` so the activity controller is always built with
+/// the text from the tap that presented it.
+private struct ShareableWishlist: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
 struct MyWishlistView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \WishlistItem.createdAt, order: .reverse) private var items: [WishlistItem]
+    @Query(
+        filter: #Predicate<WishlistItem> { $0.isOwnedByCurrentUser == true },
+        sort: \WishlistItem.createdAt,
+        order: .reverse
+    ) private var items: [WishlistItem]
     @Query(sort: \Child.name) private var children: [Child]
     @ObservedObject private var firebase = FirebaseManager.shared
+    @ObservedObject private var superwall = SuperwallManager.shared
 
     @State private var showingAddGift = false
     @State private var itemToEdit: WishlistItem?
+    @State private var selectedItem: WishlistItem?
     @State private var selectedChild: Child? = nil // Selected child for viewing their wishlist
     @State private var purchasedItemIdForSparkle: UUID? = nil
     @State private var showFallingSnow: Bool = false
+    @AppStorage("showPurchasedItems") private var showPurchasedItems = false
 
     // Share wishlist state
-    @State private var shareItems: [Any] = []
-    @State private var showingShareSheet = false
+    @State private var shareContent: ShareableWishlist?
     @State private var showingError = false
     @State private var errorMessage: String?
+    @State private var lastSyncTime: Date? = nil
+    @State private var isInitialLaunch = true // Track if this is the first sync attempt
 
     var myItems: [WishlistItem] {
         if let selectedChild = selectedChild {
@@ -37,25 +52,44 @@ struct MyWishlistView: View {
         }
     }
 
+    /// Gifts counted against the selected person's free allowance. Deduplicated by id for the
+    /// same reason `itemsList` is: a stale duplicate row shouldn't eat into the allowance.
+    private var myItemCount: Int {
+        Set(myItems.map(\.id)).count
+    }
+
+    /// Only surface the allowance once the person is close to using it up.
+    private static let capacityHintThreshold = 3
+
     var titleText: String {
         if let child = selectedChild {
-            return "\(child.name)'s Wishlist"
+            return String(localized: "\(child.name)'s Wishlist")
         }
-        return "My Wishlist"
+        return children.isEmpty
+            ? String(localized: "My Wishlist")
+            : String(localized: "Our Wishlist")
     }
 
     var body: some View {
         NavigationStack {
             mainContent
                 .navigationTitle("")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button(action: shareWishlist) {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundColor(.forestGreen)
+                .goldTitle(verbatim: titleText)
+                .navigationDestination(item: $selectedItem) { item in
+                    MyItemDetailView(
+                        item: item,
+                        onEdit: {
+                            itemToEdit = item
+                        },
+                        onDelete: {
+                            // Pop before deleting so the detail view never renders a deleted model
+                            selectedItem = nil
+                            deleteItem(item)
+                        },
+                        onTogglePurchase: {
+                            togglePurchase(item)
                         }
-                    }
+                    )
                 }
                 .sheet(isPresented: $showingAddGift) {
                     AddGiftView(
@@ -74,8 +108,8 @@ struct MyWishlistView: View {
                         itemToEdit: item
                     )
                 }
-                .sheet(isPresented: $showingShareSheet) {
-                    ShareSheet(activityItems: shareItems)
+                .sheet(item: $shareContent) { content in
+                    ShareSheet(activityItems: [content.text])
                 }
                 .alert("Error", isPresented: $showingError) {
                     Button("OK", role: .cancel) { }
@@ -86,8 +120,24 @@ struct MyWishlistView: View {
                 }
         }
         .task {
-            // Load children from Firebase (returns local immediately, syncs in background)
-            await loadChildren()
+            // Wait for authentication to be ready before syncing
+            // This prevents the "Please sign in to continue" error on app launch
+            var attempts = 0
+            while !firebase.isAuthenticated && attempts < 10 {
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1 seconds
+                attempts += 1
+            }
+
+            // Only sync if authenticated
+            if firebase.isAuthenticated {
+                await loadChildren()
+                await downloadAllItemsFromFirebase()
+            } else {
+                // After grace period, if still not authenticated, mark initial launch as complete
+                // This allows error messages to show for genuine auth failures
+                print("⚠️ [TASK] Auth grace period expired without authentication")
+                isInitialLaunch = false
+            }
         }
         .onChange(of: firebase.shouldRefreshChildren) { _, _ in
             Task {
@@ -98,13 +148,30 @@ struct MyWishlistView: View {
             if isAuth {
                 Task {
                     await loadChildren()
+                    await downloadAllItemsFromFirebase()
                 }
             }
         }
         .onAppear {
-            // Load children and items from Firebase
+            // Auto-sync items when view appears (throttled to avoid excessive syncs)
+            // Only sync if authenticated to avoid showing errors during app launch
+            guard firebase.isAuthenticated else {
+                print("⏸️ [ONAPPEAR] Skipping sync - not authenticated yet")
+                return
+            }
+
+            let now = Date()
+            if let lastSync = lastSyncTime {
+                // Only sync if it's been more than 30 seconds since last sync
+                let timeSinceLastSync = now.timeIntervalSince(lastSync)
+                if timeSinceLastSync < 30 {
+                    return
+                }
+            }
+
             Task {
-                await loadChildren()
+                await downloadAllItemsFromFirebase()
+                lastSyncTime = now
             }
         }
     }
@@ -116,22 +183,6 @@ struct MyWishlistView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Headline
-                Text(titleText)
-                    .font(.system(size: 28, weight: .bold, design: .serif))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Color.gold, Color.goldShimmer, Color.gold],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, Spacing.lg)
-                    .padding(.top, Spacing.xs)
-                    .padding(.bottom, Spacing.sm)
-                
                 // Profile Picker (only if there are children)
                 if !children.isEmpty {
                     profilePicker
@@ -161,7 +212,7 @@ struct MyWishlistView: View {
             HStack(spacing: 12) {
                 // "Me" pill
                 ProfilePill(
-                    name: "Me",
+                    name: String(localized: "Me"),
                     isSelected: selectedChild == nil,
                     action: {
                         HapticManager.buttonTapped()
@@ -189,45 +240,54 @@ struct MyWishlistView: View {
     }
 
     private var itemsList: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(Array(myItems.enumerated()), id: \.element.id) { index, item in
-                    NavigationLink {
-                        MyItemDetailView(
-                            item: item,
-                            onEdit: {
-                                itemToEdit = item
-                            },
-                            onDelete: {
-                                deleteItem(item)
-                            },
-                            onTogglePurchase: {
-                                togglePurchase(item)
-                            }
-                        )
+        // Deduplicate items by ID (keep first occurrence)
+        let uniqueItems = Array(Dictionary(grouping: myItems, by: { $0.id }).values.compactMap { $0.first }).sorted(by: { $0.createdAt > $1.createdAt })
+
+        return List {
+            sendToFriendsButton
+                .listRowInsets(EdgeInsets(top: 0, leading: Spacing.md, bottom: Spacing.md, trailing: Spacing.md))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+
+            ForEach(uniqueItems, id: \.id) { item in
+                Button {
+                    selectedItem = item
+                } label: {
+                    WishlistItemRow(
+                        item: item,
+                        showPurchaseButton: false,
+                        onDelete: nil,
+                        onTogglePurchase: nil,
+                        giftIndex: computeGiftIndex(for: item, in: uniqueItems),
+                        showSparkle: purchasedItemIdForSparkle == item.id,
+                        onSparkleComplete: {
+                            purchasedItemIdForSparkle = nil
+                        }
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .listRowInsets(EdgeInsets(top: 0, leading: Spacing.md, bottom: 0, trailing: Spacing.md))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        deleteItem(item)
                     } label: {
-                        WishlistItemRow(
-                            item: item,
-                            showPurchaseButton: false,
-                            onDelete: nil,
-                            onTogglePurchase: nil,
-                            giftIndex: computeGiftIndex(for: item, in: myItems),
-                            showSparkle: purchasedItemIdForSparkle == item.id,
-                            onSparkleComplete: {
-                                purchasedItemIdForSparkle = nil
-                            }
-                        )
+                        Label("Delete", systemImage: "trash")
                     }
-                    .buttonStyle(PlainButtonStyle())
-                    .transition(.asymmetric(
-                        insertion: .scale.combined(with: .opacity),
-                        removal: .scale.combined(with: .opacity)
-                    ))
                 }
             }
-            .padding(Spacing.md)
-            .padding(.bottom, 80) // Space for FAB
+
+            if let remaining = superwall.remainingGifts(usedCount: uniqueItems.count),
+               remaining <= Self.capacityHintThreshold {
+                giftCapacityFooter(remaining: remaining)
+            }
         }
+        .listStyle(.plain)
+        .listRowSpacing(2)
+        .scrollContentBackground(.hidden)
+        .contentMargins(.top, Spacing.md, for: .scrollContent)
+        .contentMargins(.bottom, 80, for: .scrollContent) // Space for FAB
         .refreshable {
             print("🔄 [PULL-TO-REFRESH] User pulled to refresh")
             HapticManager.buttonTapped()
@@ -235,20 +295,45 @@ struct MyWishlistView: View {
         }
     }
     
-    // Compute gift index for an item based on its position among purchased items
-    private func computeGiftIndex(for item: WishlistItem, in allItems: [WishlistItem]) -> Int? {
-        guard item.isPurchased else { return nil } // Not purchased
-        
-        // Find all purchased items and sort them by creation date (or ID for consistency)
-        let purchasedItems = allItems
-            .filter { $0.isPurchased }
-            .sorted { $0.createdAt < $1.createdAt } // Sort by creation date
-        
-        // Find this item's index in the sorted purchased items list
-        if let index = purchasedItems.firstIndex(where: { $0.id == item.id }) {
-            return index
+    private var sendToFriendsButton: some View {
+        Button(action: shareWishlist) {
+            Label("Send to Friends", systemImage: "paperplane.fill")
         }
-        return nil
+        .buttonStyle(GoldButtonStyle())
+    }
+
+    private func giftCapacityFooter(remaining: Int) -> some View {
+        Group {
+            if remaining == 0 {
+                Text("All \(SuperwallManager.freeGiftsPerPerson) free gifts used — tap + to add more")
+            } else {
+                Text("\(remaining) of \(SuperwallManager.freeGiftsPerPerson) free gifts left")
+            }
+        }
+        .font(.caption)
+        .foregroundColor(.warmGray)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, Spacing.sm)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .accessibilityAddTraits(.isStaticText)
+    }
+
+    // Whether the owner's list shows this item as purchased:
+    // self-marks always show; friend claims only when showPurchasedItems is on.
+    private func isVisiblyPurchased(_ item: WishlistItem) -> Bool {
+        item.purchasedByOwner || (showPurchasedItems && item.isPurchased)
+    }
+
+    // Compute gift index for an item based on its position among visibly purchased items
+    private func computeGiftIndex(for item: WishlistItem, in allItems: [WishlistItem]) -> Int? {
+        guard isVisiblyPurchased(item) else { return nil }
+
+        let purchasedItems = allItems
+            .filter { isVisiblyPurchased($0) }
+            .sorted { $0.createdAt < $1.createdAt }
+
+        return purchasedItems.firstIndex(where: { $0.id == item.id })
     }
 
     private var floatingActionButton: some View {
@@ -261,11 +346,16 @@ struct MyWishlistView: View {
                 FloatingActionButton(
                     action: {
                         HapticManager.buttonTapped()
-                        showingAddGift = true
+                        superwall.requestAddGift(
+                            usedCount: myItemCount,
+                            isForChild: selectedChild != nil
+                        ) {
+                            showingAddGift = true
+                        }
                     },
                     icon: "plus"
                 )
-                .sparkle(isActive: true)
+                .sparkle()
                 .padding(Spacing.lg)
             }
         }
@@ -358,27 +448,30 @@ struct MyWishlistView: View {
     }
     
     private func togglePurchase(_ item: WishlistItem) {
+        let marking = !isVisiblyPurchased(item)
+
         withAnimation {
             HapticManager.buttonTapped()
-            item.isPurchased.toggle()
-            try? modelContext.save()
-            
-            if item.isPurchased {
+            item.purchasedByOwner = marking
+            item.isPurchased = marking // optimistic; friend claims re-resolved below
+            if marking {
                 HapticManager.itemMarkedPurchased()
                 purchasedItemIdForSparkle = item.id
-                
-                // Trigger snow effect - temporarily disabled
-                // showFallingSnow = false // Reset first
-                // DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                //     showFallingSnow = true
-                //     
-                //     // Hide snow after animation completes (shorter for quick fall)
-                //     DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
-                //         showFallingSnow = false
-                //     }
-                // }
             } else {
                 HapticManager.impact(.medium)
+            }
+            try? modelContext.save()
+        }
+
+        let itemId = item.id
+        Task {
+            // On unmark, isPurchased stays true remotely if a friend still has an
+            // active claim; mirror the resolved value locally.
+            if let resolvedClaim = try? await firebase.setOwnerPurchased(id: itemId, purchased: marking) {
+                await MainActor.run {
+                    item.isPurchased = resolvedClaim
+                    try? modelContext.save()
+                }
             }
         }
     }
@@ -389,8 +482,14 @@ struct MyWishlistView: View {
 
         guard firebase.isAuthenticated else {
             print("⚠️ [FIREBASE] Not authenticated")
-            errorMessage = "Please sign in to continue"
-            showingError = true
+            // Only show error if we're past the initial auth grace period
+            // During initial launch, Firebase might still be initializing
+            if !isInitialLaunch {
+                errorMessage = String(localized: "Please sign in to continue")
+                showingError = true
+            } else {
+                print("ℹ️ [FIREBASE] Skipping error alert - still in initial auth grace period")
+            }
             return
         }
 
@@ -400,45 +499,40 @@ struct MyWishlistView: View {
             _ = try await firebase.fetchMyChildren(context: modelContext)
 
             print("✅ [FIREBASE SYNC] Sync completed successfully")
+            // Mark that we've completed initial sync successfully
+            isInitialLaunch = false
         } catch {
             print("❌ [FIREBASE SYNC] Failed: \(error.localizedDescription)")
-            errorMessage = "Failed to sync: \(error.localizedDescription)"
-            showingError = true
+            // Only show sync errors if we're authenticated but sync failed
+            // Don't show errors during initial launch when auth might still be initializing
+            if !isInitialLaunch {
+                errorMessage = String(localized: "Failed to sync: \(error.localizedDescription)")
+                showingError = true
+            }
         }
     }
 
     // Share wishlist function
     private func shareWishlist() {
         HapticManager.buttonTapped()
-        
-        // Check if there are items to share
-        guard !myItems.isEmpty else {
-            errorMessage = "Add some items to your wishlist before sharing!"
-            showingError = true
-            HapticManager.errorOccurred()
-            return
-        }
-        
-        // Format the wishlist as text
-        var shareText = "\(titleText)\n\n"
-        
-        for (index, item) in myItems.enumerated() {
-            shareText += "\(index + 1). \(item.name)\n"
-            
-            // Add URL if available
-            if let url = item.url {
-                shareText += "   \(url)\n"
+
+        let itemLines = myItems.map { item -> String in
+            if let url = item.url, !url.isEmpty {
+                return "• \(item.name)\n  \(url)"
             }
-            
-            shareText += "\n"
-        }
-        
-        // Add app promotion
-        shareText += "🎄 Create your own wishlist!\n"
-        
-        // Prepare share items
-        shareItems = [shareText]
-        showingShareSheet = true
+            return "• \(item.name)"
+        }.joined(separator: "\n")
+
+        let message = String(localized: """
+        Hi! Would you like to do a gift exchange? Build your list here and we can sync up.
+
+        \(titleText)
+        \(itemLines)
+
+        Get the app: https://apps.apple.com/app/id6755366177
+        """)
+
+        shareContent = ShareableWishlist(text: message)
     }
     
     private func loadChildren() async {
@@ -465,8 +559,13 @@ struct MyItemDetailView: View {
     let onDelete: () -> Void
     let onTogglePurchase: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("showPurchasedItems") private var showPurchasedItems = true
+    @AppStorage("showPurchasedItems") private var showPurchasedItems = false
     @State private var showingDeleteConfirmation = false
+
+    // Self-marks always show; friend claims only when showPurchasedItems is on.
+    private var isVisiblyPurchased: Bool {
+        item.purchasedByOwner || (showPurchasedItems && item.isPurchased)
+    }
 
     var body: some View {
         ZStack {
@@ -494,7 +593,7 @@ struct MyItemDetailView: View {
                         .padding(.horizontal)
 
                     // Purchase status badge
-                    if showPurchasedItems && item.isPurchased {
+                    if isVisiblyPurchased {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.successGreen)
@@ -518,112 +617,120 @@ struct MyItemDetailView: View {
                             .padding(Spacing.md)
                     }
 
-                    // Mark as Purchased button
-                    Button(action: {
-                        HapticManager.buttonTapped()
-                        onTogglePurchase()
-                    }) {
-                        if item.isPurchased {
-                            Text("Unpurchase")
+                    // Actions
+                    VStack(spacing: Spacing.sm) {
+                        // Mark as Purchased button
+                        Button(action: {
+                            HapticManager.buttonTapped()
+                            onTogglePurchase()
+                        }) {
+                            if isVisiblyPurchased {
+                                Text("Unpurchase")
+                                    .font(.bodyLarge)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.warmGray)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, Spacing.lg)
+                                    .padding(.vertical, Spacing.md)
+                                    .background(Color.creamCard)
+                                    .cornerRadius(CornerRadius.md)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: CornerRadius.md)
+                                            .stroke(Color.warmGray, lineWidth: 1)
+                                    )
+                            } else {
+                                HStack {
+                                    Text("🎁")
+                                        .font(.system(size: 20))
+                                    Text("Mark as Purchased")
+                                }
                                 .font(.bodyLarge)
-                                .fontWeight(.medium)
-                                .foregroundColor(.warmGray)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
                                 .padding(.horizontal, Spacing.lg)
                                 .padding(.vertical, Spacing.md)
-                                .background(Color.creamCard)
+                                .background(Color.forestGreen)
                                 .cornerRadius(CornerRadius.md)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: CornerRadius.md)
-                                        .stroke(Color.warmGray, lineWidth: 1)
+                                .shadow(
+                                    color: DesignShadow.medium,
+                                    radius: 8,
+                                    x: 0,
+                                    y: 4
                                 )
-                        } else {
+                            }
+                        }
+
+                        // URL Link
+                        if let url = item.url, !url.isEmpty, let urlObj = URL(string: url) {
+                            Link(destination: urlObj) {
+                                HStack {
+                                    Image(systemName: "link")
+                                    Text("View Item")
+                                }
+                                .font(.bodyLarge)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, Spacing.lg)
+                                .padding(.vertical, Spacing.md)
+                                .background(Color.gold)
+                                .cornerRadius(CornerRadius.md)
+                                .shadow(
+                                    color: Color.gold.opacity(0.3),
+                                    radius: 8,
+                                    x: 0,
+                                    y: 4
+                                )
+                            }
+                        }
+
+                        // Edit button
+                        Button(action: {
+                            HapticManager.buttonTapped()
+                            onEdit()
+                            dismiss()
+                        }) {
                             HStack {
-                                Text("🎁")
-                                    .font(.system(size: 20))
-                                Text("Mark as Purchased")
+                                Image(systemName: "pencil")
+                                Text("Edit")
                             }
                             .font(.bodyLarge)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
+                            .fontWeight(.medium)
+                            .foregroundColor(.goldDeep)
                             .frame(maxWidth: .infinity)
                             .padding(.horizontal, Spacing.lg)
                             .padding(.vertical, Spacing.md)
-                            .background(Color.forestGreen)
+                            .background(Color.goldLight.opacity(0.5))
                             .cornerRadius(CornerRadius.md)
-                            .shadow(
-                                color: DesignShadow.medium,
-                                radius: 8,
-                                x: 0,
-                                y: 4
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CornerRadius.md)
+                                    .stroke(Color.gold.opacity(0.35), lineWidth: 1)
                             )
                         }
-                    }
-                    .padding(.top, Spacing.xs)
 
-                    // URL Link
-                    if let url = item.url, !url.isEmpty, let urlObj = URL(string: url) {
-                        Link(destination: urlObj) {
+                        // Delete button
+                        Button(action: {
+                            HapticManager.buttonTapped()
+                            showingDeleteConfirmation = true
+                        }) {
                             HStack {
-                                Image(systemName: "link")
-                                Text("View Item")
+                                Image(systemName: "trash")
+                                Text("Delete")
                             }
                             .font(.bodyLarge)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
+                            .fontWeight(.medium)
+                            .foregroundColor(.errorRed)
                             .frame(maxWidth: .infinity)
                             .padding(.horizontal, Spacing.lg)
                             .padding(.vertical, Spacing.md)
-                            .background(Color.gold)
+                            .background(Color.errorRed.opacity(0.08))
                             .cornerRadius(CornerRadius.md)
-                            .shadow(
-                                color: Color.gold.opacity(0.3),
-                                radius: 8,
-                                x: 0,
-                                y: 4
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CornerRadius.md)
+                                    .stroke(Color.errorRed.opacity(0.3), lineWidth: 1)
                             )
                         }
-                        .padding(.top, Spacing.xs)
-                    }
-
-                    // Edit button
-                    Button(action: {
-                        HapticManager.buttonTapped()
-                        onEdit()
-                        dismiss()
-                    }) {
-                        HStack {
-                            Image(systemName: "pencil")
-                            Text("Edit")
-                        }
-                        .font(.bodyLarge)
-                        .fontWeight(.medium)
-                        .foregroundColor(.forestGreen)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, Spacing.lg)
-                        .padding(.vertical, Spacing.md)
-                        .background(Color.creamCard)
-                        .cornerRadius(CornerRadius.md)
-                    }
-                    .padding(.top, Spacing.xs)
-
-                    // Delete button
-                    Button(action: {
-                        HapticManager.buttonTapped()
-                        showingDeleteConfirmation = true
-                    }) {
-                        HStack {
-                            Image(systemName: "trash")
-                            Text("Delete")
-                        }
-                        .font(.bodyLarge)
-                        .fontWeight(.medium)
-                        .foregroundColor(.warmGray)
-                        .frame(maxWidth: .infinity)
-                        .padding(.horizontal, Spacing.lg)
-                        .padding(.vertical, Spacing.md)
-                        .background(Color.creamCard)
-                        .cornerRadius(CornerRadius.md)
                     }
                     .padding(.top, Spacing.xs)
                 }

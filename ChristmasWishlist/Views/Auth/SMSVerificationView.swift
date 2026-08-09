@@ -180,6 +180,6 @@ struct SMSVerificationView: View {
 
 #Preview {
     NavigationStack {
-        SMSVerificationView(phoneNumber: "(205) 292-9663")
+        SMSVerificationView(phoneNumber: "(555) 555-0123")
     }
 }

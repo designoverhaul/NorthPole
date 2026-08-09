@@ -15,11 +15,19 @@ final class Friend {
     var phoneNumber: String?
     var email: String?
     var hasApp: Bool = false
-    var friendUserRecordID: String? // The friend's CloudKit user record ID (for viewing their wishlist)
-    var cloudKitRecordID: String? // THIS friend record's CloudKit record ID (for syncing)
+    /// Legacy field — prefer phoneNumber for Firebase identity.
+    var friendUserRecordID: String?
+    /// Firestore friendship document id (field name kept for SwiftData stability).
+    var cloudKitRecordID: String?
     var addedAt: Date = Date()
     @Attribute(.externalStorage) var imageData: Data?
     var hiddenChildRecordIDs: [String] = []
+
+    /// Convenience alias for the Firestore friendship document id.
+    var firebaseFriendshipId: String? {
+        get { cloudKitRecordID }
+        set { cloudKitRecordID = newValue }
+    }
 
     init(
         id: UUID = UUID(),
@@ -35,7 +43,7 @@ final class Friend {
     ) {
         self.id = id
         self.name = name
-        self.phoneNumber = phoneNumber
+        self.phoneNumber = phoneNumber.map(PhoneNumber.normalize)
         self.email = email
         self.hasApp = hasApp
         self.friendUserRecordID = friendUserRecordID

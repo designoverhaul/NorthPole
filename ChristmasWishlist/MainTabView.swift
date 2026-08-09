@@ -12,7 +12,7 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     @Query(sort: \Child.name) private var children: [Child]
 
-    private var wishlistTabLabel: String {
+    private var wishlistTabLabel: LocalizedStringKey {
         children.isEmpty ? "My Wishlist" : "Our Wishlists"
     }
 
@@ -20,25 +20,29 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             MyWishlistView()
                 .tabItem {
-                    Label(wishlistTabLabel, systemImage: "gift")
+                    tabIcon("tabWishlist", selected: selectedTab == 0)
+                    Text(wishlistTabLabel)
                 }
                 .tag(0)
 
             FriendsListView()
                 .tabItem {
-                    Label("Friends", systemImage: "person.2")
+                    tabIcon("tabFriends", selected: selectedTab == 1)
+                    Text("Friends")
                 }
                 .tag(1)
 
             AskSantaView(isActive: .constant(selectedTab == 2))
                 .tabItem {
-                    Label("Ask Santa", systemImage: "sparkles")
+                    tabIcon("tabSanta", selected: selectedTab == 2)
+                    Text("Ask Santa")
                 }
                 .tag(2)
 
             SettingsView(isActive: selectedTab == 3)
                 .tabItem {
-                    Label("Settings", systemImage: "gearshape")
+                    tabIcon("tabSettings", selected: selectedTab == 3)
+                    Text("Settings")
                 }
                 .tag(3)
         }
@@ -47,6 +51,13 @@ struct MainTabView: View {
         .onChange(of: selectedTab) { _, _ in
             HapticManager.selection()
         }
+    }
+
+    /// Phosphor tab icons (bundled, MIT). Filled variant when selected — like
+    /// native SF Symbol tab items, but with our own custom icon set.
+    private func tabIcon(_ base: String, selected: Bool) -> Image {
+        Image(selected ? "\(base)Fill" : base)
+            .renderingMode(.template)
     }
 }
 

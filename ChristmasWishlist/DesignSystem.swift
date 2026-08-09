@@ -17,6 +17,8 @@ extension Color {
     static let gold = Color(hex: "#D4AF37")
     static let goldLight = Color(hex: "#F4E4C1")
     static let goldShimmer = Color(hex: "#FFD700")
+    // Dark enough to stay legible as text/icons on goldLight fills
+    static let goldDeep = Color(hex: "#8A6A1F")
 
     // Forest green for primary actions
     static let forestGreen = Color(hex: "#2D5016")
@@ -110,8 +112,28 @@ enum ChristmasEmojis {
 }
 
 // MARK: - Gold Gradient Title
+/// Shared styling for the gold navigation-bar title used across the app.
+struct GoldTitleLabel: View {
+    let title: Text
+
+    var body: some View {
+        title
+            .font(.system(size: 28, weight: .bold, design: .serif))
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [Color.gold, Color.goldShimmer, Color.gold],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+    }
+}
+
 struct GoldGradientTitle: ViewModifier {
-    let text: String
+    let title: Text
 
     func body(content: Content) -> some View {
         content
@@ -120,84 +142,20 @@ struct GoldGradientTitle: ViewModifier {
             .toolbarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    Text(text)
-                        .font(.system(size: 28, weight: .bold, design: .serif))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.gold, Color.goldShimmer, Color.gold],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
+                    GoldTitleLabel(title: title)
                 }
             }
     }
 }
 
 extension View {
-    func goldTitle(_ text: String) -> some View {
-        modifier(GoldGradientTitle(text: text))
+    func goldTitle(_ text: LocalizedStringKey) -> some View {
+        modifier(GoldGradientTitle(title: Text(text)))
     }
-    
-    func goldTitleWithShareButton(_ text: String, action: @escaping () -> Void) -> some View {
-        self
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(Color.creamBackground, for: .navigationBar)
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text(text)
-                        .font(.system(size: 28, weight: .bold, design: .serif))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.gold, Color.goldShimmer, Color.gold],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: action) {
-                        Image(systemName: "square.and.arrow.up")
-                            .foregroundColor(.forestGreen)
-                            .font(.system(size: 18, weight: .semibold))
-                    }
-                }
-            }
-    }
-    
-    func goldTitleWithMenu<Content: View>(_ text: String, @ViewBuilder menuContent: () -> Content) -> some View {
-        self
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(Color.creamBackground, for: .navigationBar)
-            .toolbarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text(text)
-                        .font(.system(size: 28, weight: .bold, design: .serif))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.gold, Color.goldShimmer, Color.gold],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .shadow(color: Color.gold.opacity(0.3), radius: 2, x: 0, y: 1)
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        menuContent()
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundColor(.forestGreen)
-                            .font(.system(size: 18, weight: .semibold))
-                    }
-                }
-            }
+
+    /// For titles that are already-localized strings built at runtime (e.g. "\(name)'s Wishlist").
+    func goldTitle(verbatim text: String) -> some View {
+        modifier(GoldGradientTitle(title: Text(verbatim: text)))
     }
 
     func friendNameTitle(_ fullName: String) -> some View {

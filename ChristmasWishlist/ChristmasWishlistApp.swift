@@ -32,26 +32,8 @@ struct ChristmasWishlistApp: App {
     }
     
     static var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Friend.self,
-            Child.self,
-            WishlistItem.self
-        ])
-        
-        let modelConfiguration = ModelConfiguration(
-            schema: schema,
-            isStoredInMemoryOnly: false
-        )
-
-        do {
-            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
-            container.mainContext.autosaveEnabled = true
-            print("✅ [APP] ModelContainer initialized successfully")
-            return container
-        } catch {
-            print("❌ [APP] Failed to initialize ModelContainer: \(error)")
-            fatalError("Could not create ModelContainer: \(error)")
-        }
+        // Shared with the share extension so imported gifts land in the same store.
+        AppGroupContainer.modelContainer
     }()
 }
 
@@ -85,6 +67,17 @@ struct RootView: View {
                         } catch {
                             logger.warning("⚠️ [APP] Failed to ensure user document exists: \(error)")
                         }
+
+                        // Upload gifts saved from the share extension (same App Group store)
+                        do {
+                            try await firebase.uploadUnsyncedLocalItems(context: modelContext)
+                        } catch {
+                            logger.warning("⚠️ [APP] Failed to upload unsynced local items: \(error)")
+                        }
+                        
+                        // Start purchase notification listener
+                        firebase.startPurchaseListener(context: modelContext)
+                        logger.info("✅ [APP] Purchase notification listener started")
                     }
                     .onAppear {
                         print("🎄 [APP] ✅ MainTabView appeared - SUCCESS!")
@@ -100,9 +93,25 @@ struct RootView: View {
         }
         .onChange(of: hasCompletedOnboarding) { oldValue, newValue in
             print("🎄 [APP] ⚡ hasCompletedOnboarding changed from \(oldValue) to \(newValue)")
+            if newValue && firebaseAuth.isAuthenticated {
+                // Start purchase listener when onboarding completes
+                let firebase = FirebaseManager.shared
+                firebase.startPurchaseListener(context: modelContext)
+                logger.info("✅ [APP] Purchase notification listener started (onboarding completed)")
+            }
         }
         .onChange(of: firebaseAuth.isAuthenticated) { oldValue, newValue in
             print("🔥 [APP] ⚡ isAuthenticated changed from \(oldValue) to \(newValue)")
+            let firebase = FirebaseManager.shared
+            if newValue && hasCompletedOnboarding {
+                // Start purchase listener when user authenticates and onboarding is complete
+                firebase.startPurchaseListener(context: modelContext)
+                logger.info("✅ [APP] Purchase notification listener started (user authenticated)")
+            } else if !newValue {
+                // Stop purchase listener when user logs out
+                firebase.stopPurchaseListener()
+                logger.info("🔕 [APP] Purchase notification listener stopped (user logged out)")
+            }
         }
         .onOpenURL { url in
             // Handle Firebase Auth URLs first
@@ -139,6 +148,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // Initialize Firebase FIRST, before anything else
         FirebaseApp.configure()
         logger.info("🔥 [FIREBASE] Firebase initialized")
+
+        // Superwall after Firebase so it can pick up the restored auth session for identity
+        SuperwallManager.shared.configure()
         
         // Set up Firebase Messaging delegate
         Messaging.messaging().delegate = self
@@ -153,28 +165,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         // ALWAYS request notification permissions on launch
         // This ensures the app appears in Settings → Notifications
+        //
+        // Purchase notifications are a paywalled setting, so launch only ever turns the
+        // preference *off* (when iOS permission is gone) — never on.
         Task { @MainActor in
-            // Check if we've ever requested permissions before
             let status = await NotificationManager.shared.checkAuthorizationStatus()
 
             if status == .notDetermined {
-                // First time - request permissions
                 print("📱 [PERMISSIONS] First launch - requesting notification permissions...")
                 let granted = await NotificationManager.shared.requestAuthorization()
-
-                // Set the default based on user's response
-                UserDefaults.standard.set(granted, forKey: "notificationsEnabled")
                 print("📱 [PERMISSIONS] User \(granted ? "granted" : "denied") notification permissions")
-            } else {
-                // Already requested before - sync the toggle with actual iOS permission
-                let isAuthorized = (status == .authorized)
-                let currentSetting = UserDefaults.standard.bool(forKey: "notificationsEnabled")
-
-                // If settings don't match reality, update them
-                if isAuthorized != currentSetting {
-                    UserDefaults.standard.set(isAuthorized, forKey: "notificationsEnabled")
-                    print("📱 [PERMISSIONS] Synced notification setting to match iOS permission: \(isAuthorized)")
-                }
+            } else if status == .denied, UserDefaults.standard.bool(forKey: "notificationsEnabled") {
+                UserDefaults.standard.set(false, forKey: "notificationsEnabled")
+                print("📱 [PERMISSIONS] Turned purchase notifications off — iOS permission was revoked")
             }
         }
 
@@ -292,10 +295,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         logger.info("📱 [FCM] FCM registration token: \(fcmToken ?? "nil")")
-        
-        // You can send this token to your server if needed
+
         if let token = fcmToken {
+            // Save to UserDefaults for local reference
             UserDefaults.standard.set(token, forKey: "fcmToken")
+
+            // Upload to Firestore so Cloud Functions can send notifications
+            Task {
+                do {
+                    try await FirebaseManager.shared.uploadFCMToken(token)
+                    logger.info("✅ [FCM] Token uploaded to Firestore")
+                } catch {
+                    logger.error("❌ [FCM] Failed to upload token: \(error.localizedDescription)")
+                }
+            }
         }
     }
 

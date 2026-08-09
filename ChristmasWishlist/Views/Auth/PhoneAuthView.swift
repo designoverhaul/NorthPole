@@ -68,7 +68,7 @@ struct PhoneAuthView: View {
                                     .padding(.leading, Spacing.md)
 
                                 // Phone number text field
-                                TextField("(205) 292-9663", text: $phoneNumber)
+                                TextField("Phone Number", text: $phoneNumber, prompt: Text(verbatim: "(555) 555-0123"))
                                     .keyboardType(.phonePad)
                                     .font(.system(size: 18))
                                     .textContentType(.telephoneNumber)

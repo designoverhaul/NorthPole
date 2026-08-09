@@ -33,7 +33,7 @@ struct ManageChildrenView: View {
                     SnowflakeLoadingView("Loading children...")
                 } else {
                     List {
-                        Section(header: Text("Add children to manage their wishlists. When friends add you, they'll see your children too.")
+                        Section(header: Text("Add children who don't have their own phone so you can manage their wishlists. When friends add you, they'll see your children too.")
                             .foregroundColor(.warmGray)
                             .font(.caption)
                             .textCase(nil)

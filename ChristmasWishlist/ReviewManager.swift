@@ -68,6 +68,9 @@ class ReviewManager {
 
     // MARK: - Private Helpers
 
+    /// Lets the triggering UI (sheet dismissal, sparkle animation) finish before the prompt appears.
+    private static let presentationDelay: Duration = .seconds(2)
+
     private func requestReview(reason: String) {
         // Don't prompt too frequently - wait at least 7 days between prompts
         if let lastRequestDate = UserDefaults.standard.object(forKey: Keys.lastReviewRequestDate) as? Date {
@@ -79,18 +82,20 @@ class ReviewManager {
             }
         }
 
-        // Find the active window scene
-        guard let scene = UIApplication.shared.connectedScenes
-            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else {
-            print("⭐️ [REVIEW] No active window scene found")
-            return
+        Task { @MainActor in
+            try? await Task.sleep(for: Self.presentationDelay)
+
+            guard let scene = UIApplication.shared.connectedScenes
+                .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene else {
+                print("⭐️ [REVIEW] No active window scene found")
+                return
+            }
+
+            // iOS automatically limits this to 3 prompts per 365 days
+            print("⭐️ [REVIEW] Requesting review - Reason: \(reason)")
+            AppStore.requestReview(in: scene)
+
+            UserDefaults.standard.set(Date(), forKey: Keys.lastReviewRequestDate)
         }
-
-        // Request review (iOS automatically limits to 3 per year)
-        print("⭐️ [REVIEW] Requesting review - Reason: \(reason)")
-        SKStoreReviewController.requestReview(in: scene)
-
-        // Track when we last requested
-        UserDefaults.standard.set(Date(), forKey: Keys.lastReviewRequestDate)
     }
 }

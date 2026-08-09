@@ -2,72 +2,86 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper function to get authenticated user's phone number from token
-    // Note: Token has E.164 format (+12052929663), app stores digits only (12052929663)
-    // TODO: Add custom claim for normalized phone number for better security
-    function getAuthPhone() {
-      return request.auth.token.phone_number;
+    // Auth token phone is E.164 (+12055551234).
+    // App always stores canonical digits with country code (12055551234).
+    function isSignedIn() {
+      return request.auth != null
+        && request.auth.token.phone_number is string;
     }
 
-    // Users collection - users can read all, write their own
+    function isOwnerPhone(storedPhone) {
+      return isSignedIn()
+        && storedPhone is string
+        && storedPhone.size() > 0
+        && request.auth.token.phone_number == '+' + storedPhone;
+    }
+
     match /users/{phone} {
-      // Anyone authenticated can read user documents
-      allow read: if request.auth != null;
-
-      // Only the user can write their own document
-      // For now, allow any authenticated user to write - tighten with custom claims later
-      allow write: if request.auth != null;
+      allow read: if isSignedIn();
+      allow write: if isOwnerPhone(phone);
     }
 
-    // Wishlist items - owner can write, anyone can read
+    // Friends need authenticated reads to load wishlists by ownerPhone.
+    // Writes are owner-only except friends may flip isPurchased when claiming.
     match /wishlistItems/{itemId} {
-      // Anyone authenticated can read items (for viewing friends' wishlists)
-      allow read: if request.auth != null;
+      allow read: if isSignedIn();
 
-      // Allow authenticated users to create items
-      // Client-side validation ensures ownerPhone matches user's phone
-      allow create: if request.auth != null;
+      allow create: if isSignedIn()
+        && isOwnerPhone(request.resource.data.ownerPhone);
 
-      // Allow authenticated users to update/delete
-      // Client-side validation ensures ownerPhone matches
-      allow update, delete: if request.auth != null;
+      allow update: if isSignedIn() && (
+        isOwnerPhone(resource.data.ownerPhone)
+        || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isPurchased'])
+          && request.resource.data.ownerPhone == resource.data.ownerPhone
+          && request.resource.data.name == resource.data.name
+        )
+      );
+
+      allow delete: if isOwnerPhone(resource.data.ownerPhone);
     }
 
-    // Children - parent can read/write, friends can read
     match /children/{childId} {
-      // Anyone authenticated can read (for viewing friend's children)
-      allow read: if request.auth != null;
-
-      // Allow authenticated users to create/update/delete children
-      // Client-side validation ensures parentPhone matches user's phone
-      allow write: if request.auth != null;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && isOwnerPhone(request.resource.data.parentPhone);
+      allow update, delete: if isOwnerPhone(resource.data.parentPhone);
     }
 
-    // Purchases - anyone can create, owner/purchaser can read/delete
+    // purchaserPhone stays private — only owner or purchaser can read.
+    // Friends use wishlistItems.isPurchased for claim status.
     match /purchases/{purchaseId} {
-      // Anyone authenticated can read purchases
-      allow read: if request.auth != null;
+      // resource is null when the document does not exist; without this the
+      // rule throws and the client sees "permission denied" instead of "not found".
+      allow read: if isSignedIn() && (
+        resource == null
+        || isOwnerPhone(resource.data.ownerPhone)
+        || isOwnerPhone(resource.data.purchaserPhone)
+      );
 
-      // Anyone authenticated can create a purchase (mark item as bought)
-      allow create: if request.auth != null;
+      allow create: if isSignedIn()
+        && isOwnerPhone(request.resource.data.purchaserPhone)
+        && request.resource.data.isActive == true;
 
-      // Allow authenticated users to delete purchases
-      // Client-side validation ensures user is purchaser or owner
-      allow delete: if request.auth != null;
+      allow update, delete: if isSignedIn() && (
+        isOwnerPhone(resource.data.purchaserPhone)
+        || isOwnerPhone(resource.data.ownerPhone)
+      );
     }
 
-    // Friends - user can manage their own friendships
     match /friends/{friendshipId} {
-      // User can read friendships where they are involved
-      allow read: if request.auth != null;
+      // resource is null when the document does not exist — adding a new friend
+      // reads the doc first to decide create vs merge.
+      allow read: if isSignedIn() && (
+        resource == null
+        || isOwnerPhone(resource.data.userPhone)
+        || isOwnerPhone(resource.data.friendPhone)
+      );
 
-      // Allow authenticated users to create/update friendships
-      // Client-side validation ensures userPhone matches
-      allow create, update: if request.auth != null;
+      allow create: if isSignedIn()
+        && isOwnerPhone(request.resource.data.userPhone);
 
-      // Allow authenticated users to delete friendships
-      // Client-side validation ensures userPhone matches
-      allow delete: if request.auth != null;
+      allow update, delete: if isOwnerPhone(resource.data.userPhone);
     }
   }
 }

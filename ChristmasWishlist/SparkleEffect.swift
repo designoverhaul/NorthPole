@@ -6,85 +6,65 @@
 //
 
 import SwiftUI
-import CoreMotion
 import UIKit
 
-// MARK: - Sparkle Particle
-struct SparkleParticle: Identifiable {
-    let id = UUID()
-    var x: CGFloat
-    var y: CGFloat
-    var scale: CGFloat
-    var opacity: Double
-    var delay: Double
-    var depth: CGFloat // Depth layer for parallax effect (0.5 = background, 1.5 = foreground)
+// MARK: - Sparkle Placement
+/// A sparkle's resting spot, in unit space relative to the decorated view.
+/// Values just outside 0...1 let a sparkle sit slightly past the edge.
+struct SparklePlacement: Identifiable {
+    let id: Int
+    let x: CGFloat
+    let y: CGFloat
+    let size: CGFloat
+    let delay: Double
 }
 
 // MARK: - Sparkle Effect View
 struct SparkleEffect: View {
-    let particleCount: Int
-    @State private var particles: [SparkleParticle] = []
-    @State private var animate = false
-    @State private var twinkle = false
-    @StateObject private var motionManager = MotionManager()
+    /// Hand-placed so sparkles frame the view instead of scattering over its label.
+    private static let placements: [SparklePlacement] = [
+        SparklePlacement(id: 0, x: 0.05, y: 0.24, size: 11, delay: 0.0),
+        SparklePlacement(id: 1, x: 0.94, y: 0.20, size: 8, delay: 1.3),
+        SparklePlacement(id: 2, x: 0.82, y: 0.80, size: 12, delay: 2.6),
+        SparklePlacement(id: 3, x: 0.18, y: 0.84, size: 8, delay: 3.9),
+        SparklePlacement(id: 4, x: 0.50, y: -0.08, size: 7, delay: 2.0),
+        SparklePlacement(id: 5, x: 1.03, y: 0.60, size: 7, delay: 4.6)
+    ]
 
-    init(particleCount: Int = 12) {
+    /// One half of the twinkle cycle. Slow enough that the pulse reads as
+    /// ambient shimmer rather than motion.
+    private static let twinkleDuration: Double = 3.6
+
+    let particleCount: Int
+    @State private var twinkle = false
+
+    init(particleCount: Int = 6) {
         self.particleCount = particleCount
     }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                ForEach(particles) { particle in
-                    // Calculate parallax offset based on device motion and particle depth
-                    let parallaxX = motionManager.roll * 10 * particle.depth
-                    let parallaxY = motionManager.pitch * 10 * particle.depth
-
-                    // Star shape for sparkle effect
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.white, .white.opacity(0.8)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .font(.system(size: 8 * particle.scale))
-                        .position(
-                            x: particle.x + parallaxX,
-                            y: particle.y + parallaxY
-                        )
-                        .opacity(twinkle ? particle.opacity : 0.2)
-                        .scaleEffect(twinkle ? 1.2 : 0.6)
-                        .rotationEffect(.degrees(twinkle ? 180 : 0))
+                ForEach(Array(Self.placements.prefix(particleCount))) { placement in
+                    Image(systemName: "sparkle")
+                        .font(.system(size: placement.size, weight: .medium))
+                        .foregroundStyle(.white)
+                        .shadow(color: .white.opacity(0.5), radius: 2)
+                        .opacity(twinkle ? 0.9 : 0.5)
+                        .scaleEffect(twinkle ? 1.0 : 0.92)
                         .animation(
-                            .easeInOut(duration: 0.8)
+                            .easeInOut(duration: Self.twinkleDuration)
                             .repeatForever(autoreverses: true)
-                            .delay(particle.delay),
+                            .delay(placement.delay),
                             value: twinkle
                         )
-                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: motionManager.roll)
-                        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: motionManager.pitch)
-                        .shadow(color: .white.opacity(0.8), radius: 4)
+                        .position(
+                            x: placement.x * geometry.size.width,
+                            y: placement.y * geometry.size.height
+                        )
                 }
             }
-            .onAppear {
-                generateParticles(in: geometry.size)
-                twinkle = true
-            }
-        }
-    }
-
-    private func generateParticles(in size: CGSize) {
-        particles = (0..<particleCount).map { index in
-            SparkleParticle(
-                x: CGFloat.random(in: 0...size.width),
-                y: CGFloat.random(in: 0...size.height),
-                scale: CGFloat.random(in: 0.5...1.5),
-                opacity: Double.random(in: 0.3...0.8),
-                delay: Double.random(in: 0...1.0),
-                depth: CGFloat.random(in: 0.5...1.5) // Varying depth creates layered parallax
-            )
+            .onAppear { twinkle = true }
         }
     }
 }
@@ -98,7 +78,7 @@ struct SparkleModifier: ViewModifier {
             .overlay(
                 Group {
                     if isActive {
-                        SparkleEffect(particleCount: 8)
+                        SparkleEffect()
                             .allowsHitTesting(false)
                     }
                 }

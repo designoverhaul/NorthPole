@@ -1,0 +1,6 @@
+North Pole now speaks your language — the whole app, including Santa's gift ideas, is available in Spanish, French, German, Italian, Portuguese, and Japanese.
+
+• Check off gifts you've already bought yourself, kept separate from what your friends have claimed
+• Ask Santa answers much faster, with more specific ideas you can actually buy
+• Refreshed tab bar and a little more polish throughout
+• Fixes for adding friends from your contacts, and for gift claims that could be lost when a list was edited

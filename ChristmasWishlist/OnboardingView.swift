@@ -19,7 +19,8 @@ enum OnboardingStep {
 
 struct OnboardingView: View {
     @Environment(\.modelContext) private var modelContext
-    @AppStorage("showPurchasedItems") private var showPurchasedItems = true
+    @AppStorage("showPurchasedItems") private var showPurchasedItems = false
+    @AppStorage("notificationsEnabled") private var notificationsEnabled = false
     @State private var currentStep: OnboardingStep = .welcome
     @State private var showingContactPicker = false
     @State private var selectedContacts: [CNContact] = []
@@ -172,7 +173,7 @@ struct OnboardingView: View {
                     .shadow(color: Color.gold.opacity(0.4), radius: 12, x: 0, y: 6)
                     .shadow(color: Color.goldShimmer.opacity(0.3), radius: 4, x: 0, y: 2)
                 }
-                .sparkle(isActive: true)
+                .sparkle()
                 .padding(.horizontal, Spacing.xl)
                 .padding(.bottom, Spacing.lg)
 
@@ -206,7 +207,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, Spacing.lg)
 
             // Santa's message (directly on background, no container)
-            Text("Would you like to add your kids to the gift exchange?")
+            Text("Would you like to add your kids (without a phone) to the gift exchange?")
                 .font(.custom("Caveat", size: 32))
                 .lineSpacing(-8)
                 .foregroundColor(.warmBlack)
@@ -278,7 +279,7 @@ struct OnboardingView: View {
                 .shadow(color: Color.gold.opacity(0.4), radius: 12, x: 0, y: 6)
                 .shadow(color: Color.goldShimmer.opacity(0.3), radius: 4, x: 0, y: 2)
             }
-            .sparkle(isActive: true)
+            .sparkle()
             .padding(.horizontal, Spacing.xl)
 
             // Continue/Skip Button
@@ -366,10 +367,7 @@ struct OnboardingView: View {
                     // "I like surprises!" button
                     Button {
                         HapticManager.buttonTapped()
-                        showPurchasedItems = false
-                        UserDefaults.standard.set(false, forKey: "showPurchasedItems")
-                        UserDefaults.standard.set(false, forKey: "notificationsEnabled")
-                        moveToInstructionsScreen()
+                        chooseSurprises()
                     } label: {
                         VStack(spacing: Spacing.xs) {
                             Text("I like surprises!")
@@ -396,15 +394,12 @@ struct OnboardingView: View {
                         .shadow(color: Color.gold.opacity(0.4), radius: 12, x: 0, y: 6)
                         .shadow(color: Color.goldShimmer.opacity(0.3), radius: 4, x: 0, y: 2)
                     }
-                    .sparkle(isActive: true)
+                    .sparkle()
 
                     // "I don't like surprises" button
                     Button {
                         HapticManager.buttonTapped()
-                        showPurchasedItems = true
-                        UserDefaults.standard.set(true, forKey: "showPurchasedItems")
-                        UserDefaults.standard.set(true, forKey: "notificationsEnabled")
-                        moveToInstructionsScreen()
+                        chooseSpoilers()
                     } label: {
                         VStack(spacing: Spacing.xs) {
                             Text("I don't like surprises.")
@@ -466,7 +461,7 @@ struct OnboardingView: View {
                     .frame(height: 40)
 
                 // Heading
-                Text("Adding items\nto your wishlist")
+                Text("Adding items from the web\nto your wishlist")
                     .font(.custom("Caveat", size: 36))
                     .lineSpacing(-8)
                     .foregroundColor(.warmBlack)
@@ -537,7 +532,7 @@ struct OnboardingView: View {
                     .shadow(color: Color.gold.opacity(0.4), radius: 12, x: 0, y: 6)
                     .shadow(color: Color.goldShimmer.opacity(0.3), radius: 4, x: 0, y: 2)
                 }
-                .sparkle(isActive: true)
+                .sparkle()
                 .padding(.horizontal, Spacing.xl)
                 .padding(.bottom, Spacing.xl)
             }
@@ -622,6 +617,40 @@ struct OnboardingView: View {
         }
     }
 
+    /// Keeps friends' claims hidden — the free choice, and the default for both settings.
+    private func chooseSurprises() {
+        showPurchasedItems = false
+        notificationsEnabled = false
+        moveToInstructionsScreen()
+    }
+
+    /// Reveals claims and purchase notifications, which is the same paid feature as the two
+    /// Settings switches — the paywall decides, so onboarding only continues once it unlocks.
+    private func chooseSpoilers() {
+        SuperwallManager.shared.requestRevealPurchases(feature: .onboardingSurprises) {
+            showPurchasedItems = true
+            notificationsEnabled = true
+            requestNotificationPermissionsAndContinue()
+        }
+    }
+
+    private func requestNotificationPermissionsAndContinue() {
+        Task { @MainActor in
+            let status = await NotificationManager.shared.checkAuthorizationStatus()
+            if status == .notDetermined {
+                print("📱 [ONBOARDING] Requesting notification permissions...")
+                let granted = await NotificationManager.shared.requestAuthorization()
+                if !granted {
+                    notificationsEnabled = false
+                }
+            } else if status == .denied {
+                notificationsEnabled = false
+            }
+
+            moveToInstructionsScreen()
+        }
+    }
+
     private func addChild() {
         guard !newChildName.isEmpty else { return }
 
@@ -639,34 +668,35 @@ struct OnboardingView: View {
     }
 
     private func addFriend(from contact: CNContact) async {
-        // Get primary phone/email for display/saving
         let phoneNumber = contact.phoneNumbers.first?.value.stringValue
         let email = contact.emailAddresses.first?.value as String?
-
         let name = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
+
+        guard let phone = phoneNumber, !phone.isEmpty else { return }
 
         HapticManager.itemAdded()
 
-        // Get contact's photo if available
         var imageData: Data?
         if contact.imageDataAvailable {
             imageData = contact.imageData
         }
 
-        // Save friend to SwiftData (Local Storage)
-        // Firebase discovery will be implemented later
-        let newFriend = Friend(
-            name: name,
-            phoneNumber: phoneNumber,
-            email: email,
-            hasApp: false, // Will be discovered via Firebase later
-            friendUserRecordID: nil,
-            imageData: imageData
-        )
-
-        await MainActor.run {
-            modelContext.insert(newFriend)
-            try? modelContext.save()
+        // Firestore is the source of truth for friendships. A local-only Friend row
+        // would look added but never connect the two accounts, so retry instead of
+        // faking it, and keep onboarding moving if it still fails.
+        for attempt in 1...2 {
+            do {
+                _ = try await FirebaseManager.shared.addFriend(
+                    name: name,
+                    phone: phone,
+                    email: email,
+                    imageData: imageData,
+                    context: modelContext
+                )
+                return
+            } catch {
+                print("⚠️ [ONBOARDING] Failed to save friend \(name) (attempt \(attempt)): \(error)")
+            }
         }
     }
 

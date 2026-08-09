@@ -66,38 +66,6 @@ struct AddGiftView: View {
 
                 ScrollView {
                     VStack(spacing: Spacing.lg) {
-                        // Name field (required)
-                        VStack(alignment: .leading, spacing: Spacing.sm) {
-                            Text("Item Name")
-                                .font(.bodyMedium)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.warmBlack)
-
-                            TextField("e.g., Coffee Maker", text: $name)
-                                .font(.bodyLarge)
-                                .foregroundColor(.warmBlack)
-                                .padding(Spacing.md)
-                                .background(Color.white)
-                                .cornerRadius(CornerRadius.md)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: CornerRadius.md)
-                                        .stroke(focusedField == .name ? Color.forestGreen : Color.warmGrayLight, lineWidth: 2)
-                                )
-                                .focused($focusedField, equals: .name)
-
-                            // Title cleaning indicator
-                            if isCleaningTitle {
-                                HStack(spacing: Spacing.sm) {
-                                    Text("✨")
-                                        .font(.system(size: 16))
-                                    Text("Cleaning title...")
-                                        .font(.caption)
-                                        .foregroundColor(.forestGreen)
-                                }
-                                .padding(.top, Spacing.xs)
-                            }
-                        }
-
                         // URL field (optional)
                         VStack(alignment: .leading, spacing: Spacing.sm) {
                             HStack {
@@ -119,7 +87,7 @@ struct AddGiftView: View {
                             }
 
                             HStack(spacing: 0) {
-                                TextField("https://example.com/product", text: $url)
+                                TextField("", text: $url)
                                     .font(.bodyMedium)
                                     .foregroundColor(.warmBlack)
                                     .keyboardType(.URL)
@@ -131,6 +99,8 @@ struct AddGiftView: View {
                                 Button(action: {
                                     if let pastedString = UIPasteboard.general.string {
                                         url = pastedString
+                                        // Dismiss keyboard after pasting
+                                        focusedField = nil
                                     }
                                     HapticManager.buttonTapped()
                                     checkClipboard()
@@ -165,6 +135,38 @@ struct AddGiftView: View {
                                     Text("❄️")
                                         .font(.system(size: 16))
                                     Text("Extracting product info...")
+                                        .font(.caption)
+                                        .foregroundColor(.forestGreen)
+                                }
+                                .padding(.top, Spacing.xs)
+                            }
+                        }
+
+                        // Name field (required)
+                        VStack(alignment: .leading, spacing: Spacing.sm) {
+                            Text("Item Name")
+                                .font(.bodyMedium)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.warmBlack)
+
+                            TextField("e.g., Coffee Maker", text: $name)
+                                .font(.bodyLarge)
+                                .foregroundColor(.warmBlack)
+                                .padding(Spacing.md)
+                                .background(Color.white)
+                                .cornerRadius(CornerRadius.md)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CornerRadius.md)
+                                        .stroke(focusedField == .name ? Color.forestGreen : Color.warmGrayLight, lineWidth: 2)
+                                )
+                                .focused($focusedField, equals: .name)
+
+                            // Title cleaning indicator
+                            if isCleaningTitle {
+                                HStack(spacing: Spacing.sm) {
+                                    Text("✨")
+                                        .font(.system(size: 16))
+                                    Text("Cleaning title...")
                                         .font(.caption)
                                         .foregroundColor(.forestGreen)
                                 }
@@ -312,7 +314,10 @@ struct AddGiftView: View {
         isSyncingToCloud = true
 
         let imageData = selectedImage?.jpegData(compressionQuality: 0.7)
-        print("💾 AddGiftView saveItem - selectedImage exists: \(selectedImage != nil), imageData bytes: \(imageData?.count ?? 0)")
+        print("💾 [ADDGIFT] saveItem - selectedImage exists: \(selectedImage != nil), imageData bytes: \(imageData?.count ?? 0)")
+        if let imageData = imageData {
+            print("💾 [ADDGIFT] Image data size: \(imageData.count) bytes")
+        }
 
         if let existingItem = itemToEdit {
             // Update existing item
@@ -320,11 +325,11 @@ struct AddGiftView: View {
             existingItem.url = url.isEmpty ? nil : url.trimmingCharacters(in: .whitespacesAndNewlines)
             existingItem.itemDescription = description.isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines)
             existingItem.imageData = imageData
-            print("✏️ Updated item '\(existingItem.name)' with imageData: \(existingItem.imageData != nil)")
+            print("✏️ [ADDGIFT] Updated item '\(existingItem.name)' with imageData: \(existingItem.imageData != nil), bytes: \(existingItem.imageData?.count ?? 0)")
 
             // Sync update to Firebase
             Task {
-                await syncItemToFirebase(item: existingItem)
+                await syncItemToFirebase(item: existingItem, isNewItem: false)
             }
         } else {
             // Create new item
@@ -333,14 +338,18 @@ struct AddGiftView: View {
                 url: url.isEmpty ? nil : url.trimmingCharacters(in: .whitespacesAndNewlines),
                 itemDescription: description.isEmpty ? nil : description.trimmingCharacters(in: .whitespacesAndNewlines),
                 ownerId: userId,
-                imageData: imageData
+                imageData: imageData,
+                imageUrl: nil, // Will be set after upload to Firebase
+                ownerPhone: FirebaseAuthManager.shared.currentUserPhone ?? "",
+                isOwnedByCurrentUser: true,
+                lastSyncedAt: nil // Will be set after sync to Firebase
             )
             modelContext.insert(newItem)
-            print("➕ Created new item '\(newItem.name)' with imageData: \(newItem.imageData != nil), bytes: \(newItem.imageData?.count ?? 0)")
+            print("➕ [ADDGIFT] Created new item '\(newItem.name)' with imageData: \(newItem.imageData != nil), bytes: \(newItem.imageData?.count ?? 0)")
 
             // Sync new item to Firebase immediately
             Task {
-                await syncItemToFirebase(item: newItem)
+                await syncItemToFirebase(item: newItem, isNewItem: true)
             }
         }
 
@@ -349,7 +358,7 @@ struct AddGiftView: View {
         dismiss()
     }
 
-    private func syncItemToFirebase(item: WishlistItem) async {
+    private func syncItemToFirebase(item: WishlistItem, isNewItem: Bool) async {
         guard firebase.isAuthenticated else {
             print("⚠️ [SYNC] Not authenticated, skipping Firebase sync")
             isSyncingToCloud = false
@@ -357,6 +366,7 @@ struct AddGiftView: View {
         }
 
         print("☁️ [SYNC] Syncing item '\(item.name)' to Firebase...")
+        print("☁️ [SYNC] Item has imageData: \(item.imageData != nil), bytes: \(item.imageData?.count ?? 0)")
 
         do {
             // Determine if this belongs to a child by checking if item.ownerId matches any child's ID
@@ -383,7 +393,7 @@ struct AddGiftView: View {
                     print("❌ [SYNC] ERROR: Child '\(child.name)' exists but has no Firebase ID! This item will be saved incorrectly.")
                     print("❌ [SYNC] This should not happen - child should have been synced to Firebase first.")
                     // Don't save without childId - it would appear in parent's list incorrectly
-                    throw NSError(domain: "AddGiftView", code: 1, userInfo: [NSLocalizedDescriptionKey: "Child account not properly synced to Firebase. Please try again."])
+                    throw NSError(domain: "AddGiftView", code: 1, userInfo: [NSLocalizedDescriptionKey: String(localized: "Child account not properly synced. Please try again.")])
                 }
             } else {
                 print("✅ [SYNC] Item belongs to user (not a child)")
@@ -409,6 +419,10 @@ struct AddGiftView: View {
                 print("✅ [SYNC] This item should appear in user's wishlist")
             }
             isSyncingToCloud = false
+
+            if isNewItem {
+                ReviewManager.shared.incrementItemsAdded()
+            }
         } catch {
             print("❌ [SYNC] Failed to sync to Firebase: \(error.localizedDescription)")
             isSyncingToCloud = false
@@ -451,6 +465,8 @@ struct AddGiftView: View {
 
         // If user pasted a URL (length increased by >10 chars) and it looks like a URL
         if lengthIncrease > 10 && newValue.contains(".") && !isExtractingData {
+            // Dismiss keyboard after pasting URL
+            focusedField = nil
             extractProductData(from: newValue)
         }
 
@@ -491,17 +507,17 @@ struct AddGiftView: View {
                 if !isIdentical && !isTooSimilar {
                     // Use the description - it has meaningful content
                     if let price = productData.price {
-                        self.description = "\(extractedDescription)\n\nPrice: \(price)"
+                        self.description = "\(extractedDescription)\n\n" + String(localized: "Price: \(price)")
                     } else {
                         self.description = extractedDescription
                     }
                 } else if let price = productData.price {
                     // Description is duplicate, so only add price
-                    self.description = "Price: \(price)"
+                    self.description = String(localized: "Price: \(price)")
                 }
             } else if let price = productData.price, description.isEmpty {
                 // Only price available
-                self.description = "Price: \(price)"
+                self.description = String(localized: "Price: \(price)")
             }
 
             // Download and set image if available

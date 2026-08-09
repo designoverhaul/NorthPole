@@ -20,8 +20,20 @@ class FirebaseStorageManager: ObservableObject {
     private let storage = Storage.storage()
     private let maxImageSize: Int64 = 10 * 1024 * 1024 // 10 MB
 
+    // Image cache using NSCache (handles memory pressure automatically)
+    private let imageCache = NSCache<NSString, NSData>()
+
     private init() {
         logger.info("✅ [STORAGE] FirebaseStorageManager initialized")
+        // Configure cache limits (optional)
+        imageCache.countLimit = 100 // Max 100 images
+        imageCache.totalCostLimit = 50 * 1024 * 1024 // Max 50 MB
+    }
+
+    /// Clear image cache
+    func clearImageCache() {
+        imageCache.removeAllObjects()
+        logger.debug("🗑️ [CACHE] Cleared image cache")
     }
 
     // MARK: - Image Upload
@@ -87,17 +99,29 @@ class FirebaseStorageManager: ObservableObject {
 
     // MARK: - Image Download
 
-    /// Download image from Firebase Storage
+    /// Download image from Firebase Storage (with caching)
     func downloadImage(from urlString: String) async throws -> Data {
+        // Check cache first
+        let cacheKey = urlString as NSString
+        if let cachedData = imageCache.object(forKey: cacheKey) as Data? {
+            logger.debug("💾 [CACHE] Returning cached image (\(cachedData.count) bytes)")
+            return cachedData
+        }
+
         guard let url = URL(string: urlString) else {
             throw StorageError.invalidURL
         }
 
-        logger.info("📥 [STORAGE] Downloading image from: \(urlString)")
+        logger.info("📥 [STORAGE] Downloading image from network: \(urlString)")
 
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             logger.info("✅ [STORAGE] Image downloaded: \(data.count) bytes")
+
+            // Cache the downloaded image
+            imageCache.setObject(data as NSData, forKey: cacheKey, cost: data.count)
+            logger.debug("💾 [CACHE] Cached image (\(data.count) bytes)")
+
             return data
         } catch {
             logger.error("❌ [STORAGE] Failed to download image: \(error.localizedDescription)")

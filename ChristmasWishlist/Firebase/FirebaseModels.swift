@@ -34,6 +34,8 @@ struct FirestoreWishlistItem: Codable {
     var ownerType: String  // "user" or "child"
     var childId: String?
     var isPurchased: Bool
+    /// True when the owner checked the item off themselves (friend claims never set this).
+    var purchasedByOwner: Bool
 }
 
 /// Child document model (Firestore: children/{childId})
@@ -86,7 +88,8 @@ extension FirestoreWishlistItem {
             "createdAt": createdAt,
             "ownerPhone": ownerPhone,
             "ownerType": ownerType,
-            "isPurchased": isPurchased
+            "isPurchased": isPurchased,
+            "purchasedByOwner": purchasedByOwner
         ]
 
         if let url = url { dict["url"] = url }
@@ -110,7 +113,8 @@ extension FirestoreWishlistItem {
             ownerPhone: data["ownerPhone"] as? String ?? "",
             ownerType: data["ownerType"] as? String ?? "user",
             childId: data["childId"] as? String,
-            isPurchased: data["isPurchased"] as? Bool ?? false
+            isPurchased: data["isPurchased"] as? Bool ?? false,
+            purchasedByOwner: data["purchasedByOwner"] as? Bool ?? false
         )
     }
 }

@@ -11,39 +11,15 @@ import OSLog
 
 private let logger = Logger(subsystem: "com.designoverhaul.ChristmasWishlist", category: "FriendWishlist")
 
-// MARK: - Friend Wishlist Item (read-only representation)
-struct FriendWishlistItem: Identifiable {
-    let id: String // Firestore document ID
-    let name: String
-    let url: String?
-    let itemDescription: String?
-    let imageUrl: String?
-    let createdAt: Date
-    let isPurchased: Bool
-    var imageData: Data? // Loaded separately
-    
-    init(from firestoreItem: FirestoreWishlistItem, itemId: String) {
-        self.id = itemId
-        self.name = firestoreItem.name
-        self.url = firestoreItem.url
-        self.itemDescription = firestoreItem.itemDescription
-        self.imageUrl = firestoreItem.imageUrl
-        self.createdAt = firestoreItem.createdAt.toDate
-        self.isPurchased = firestoreItem.isPurchased
-        self.imageData = nil
-    }
-}
-
 struct FriendWishlistView: View {
     let friend: Friend
     let childId: String?
     let childName: String?
-    
+
     @Environment(\.modelContext) private var modelContext
     @ObservedObject private var firebase = FirebaseManager.shared
-    @State private var items: [FriendWishlistItem] = []
-    @State private var purchases: [String: FirestorePurchase] = [:] // itemId -> Purchase
-    @State private var isLoading = false
+    @Query private var cachedItems: [WishlistItem]
+    @State private var isSyncing = false
     @State private var errorMessage: String?
     @State private var purchasedItemIdForSparkle: String? = nil
     @State private var showFallingSnow: Bool = false
@@ -51,23 +27,48 @@ struct FriendWishlistView: View {
     @State private var showingDeleteAlert = false
     @State private var showingHideChildAlert = false
     @State private var showingPurchaseConfirmation = false
-    @State private var itemToPurchase: FriendWishlistItem?
+    @State private var itemToPurchase: WishlistItem?
     @State private var isCheckingForApp = false
     @Environment(\.dismiss) private var dismiss
+
+    init(friend: Friend, childId: String? = nil, childName: String? = nil) {
+        self.friend = friend
+        self.childId = childId
+        self.childName = childName
+
+        let normalizedPhone = PhoneNumber.normalize(friend.phoneNumber ?? "")
+        let childFilter = childId ?? ""
+
+        if childFilter.isEmpty {
+            let predicate = #Predicate<WishlistItem> { item in
+                item.ownerPhone == normalizedPhone &&
+                item.isOwnedByCurrentUser == false &&
+                item.childId == ""
+            }
+            _cachedItems = Query(filter: predicate, sort: \.createdAt, order: .reverse)
+        } else {
+            let predicate = #Predicate<WishlistItem> { item in
+                item.ownerPhone == normalizedPhone &&
+                item.isOwnedByCurrentUser == false &&
+                item.childId == childFilter
+            }
+            _cachedItems = Query(filter: predicate, sort: \.createdAt, order: .reverse)
+        }
+    }
 
     private var displayName: String {
         childName ?? friend.name
     }
+
+    private var friendFirstName: String {
+        String(friend.name.split(separator: " ").first ?? "")
+    }
     
     private var ownerPhone: String? {
-        if let childId = childId {
-            // For children, we'll need to get the parent's phone from the friend
-            return friend.phoneNumber
-        }
-        return friend.phoneNumber
+        friend.phoneNumber.map(PhoneNumber.normalize)
     }
 
-    var body: some View {
+    private var mainContent: some View {
         ZStack {
             Color.creamBackground
                 .ignoresSafeArea()
@@ -79,175 +80,173 @@ struct FriendWishlistView: View {
                             .padding()
                     } else if !friend.hasApp {
                         noAppView
-                    } else if items.isEmpty && !isLoading {
+                    } else if cachedItems.isEmpty {
                         emptyWishlistView
-                    } else if items.isEmpty && isLoading {
-                        VStack(spacing: Spacing.lg) {
-                            Spacer()
-                            SnowflakeLoadingView("Loading wishlist...")
-                            Spacer()
-                        }
                     } else {
-                        ScrollView {
-                            LazyVStack(spacing: 2) {
-                                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                    NavigationLink {
-                                        FriendItemDetailView(
-                                            item: item,
-                                            isPurchased: purchases[item.id] != nil,
-                                            onTogglePurchase: {
-                                                togglePurchase(item)
-                                            }
-                                        )
-                                    } label: {
-                                        FriendWishlistItemRow(
-                                            item: item,
-                                            isPurchased: purchases[item.id] != nil,
-                                            giftIndex: computeGiftIndex(for: item, in: items, purchases: purchases),
-                                            showSparkle: purchasedItemIdForSparkle == item.id,
-                                            onSparkleComplete: {
-                                                purchasedItemIdForSparkle = nil
-                                            }
-                                        )
-                                    }
-                                    .buttonStyle(PlainButtonStyle())
-                                    .transition(.asymmetric(
-                                        insertion: .scale.combined(with: .opacity),
-                                        removal: .scale.combined(with: .opacity)
-                                    ))
-                                }
-                            }
-                            .padding(Spacing.md)
-                            .padding(.bottom, 80)
-                        }
-                        .refreshable {
-                            await loadItems(forceRefresh: true)
-                        }
-                    }
-
-                    if isLoading {
-                        VStack {
-                            Spacer()
-                            HStack(spacing: 8) {
-                                Image(systemName: "snowflake")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.forestGreen)
-                                    .rotationEffect(.degrees(isLoading ? 360 : 0))
-                                    .animation(.linear(duration: 2).repeatForever(autoreverses: false), value: isLoading)
-
-                                Text("Updating...")
-                                    .font(.caption)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.warmBlack)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule()
-                                    .fill(Color.white)
-                                    .shadow(color: DesignShadow.soft, radius: 8, x: 0, y: 4)
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(Color.forestGreen.opacity(0.1), lineWidth: 1)
-                                    )
-                            )
-                            .padding(.bottom, 20)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
-                        .animation(.easeInOut, value: isLoading)
+                        wishlistContent
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle("")
-        .friendNameTitle(displayName)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    if childId != nil {
-                        Button(action: {
-                            showingHideChildAlert = true
-                        }) {
-                            Label("Hide Child", systemImage: "eye.slash")
-                                .foregroundColor(.warmGray)
-                        }
-                    } else {
-                        Button(action: {
-                            HapticManager.buttonTapped()
-                            showingShareSheet = true
-                        }) {
-                            Label("Invite \(String(friend.name.split(separator: " ").first ?? ""))", systemImage: "paperplane.fill")
-                                .foregroundColor(.warmGray)
-                        }
+    }
 
-                        Button(action: {
-                            showingDeleteAlert = true
-                        }) {
-                            Label("Remove Friend", systemImage: "person.fill.xmark")
-                                .foregroundColor(.warmGray)
-                        }
+    private var wishlistContent: some View {
+        ScrollView {
+            LazyVStack(spacing: 2) {
+                // Create local snapshot like MyWishlistView
+                let items = Array(cachedItems)
+
+                ForEach(items, id: \.id) { item in
+                    let itemIdString = item.id.uuidString
+
+                    NavigationLink {
+                        FriendItemDetailView(item: item)
+                    } label: {
+                        FriendWishlistItemRow(
+                            item: item,
+                            isPurchased: item.isPurchased,
+                            giftIndex: computeGiftIndex(for: item, in: items),
+                            showSparkle: purchasedItemIdForSparkle == itemIdString,
+                            onSparkleComplete: {
+                                purchasedItemIdForSparkle = nil
+                            }
+                        )
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 18))
-                        .foregroundColor(.warmGray)
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
+            .padding(Spacing.md)
+            .padding(.bottom, 80)
         }
-        .task {
-            logger.info("👁️ [APPEAR] FriendWishlistView appeared for \(friend.name)")
-            logger.info("👁️ [APPEAR] hasApp: \(friend.hasApp), childId: \(childId ?? "nil")")
-
-            if !friend.hasApp {
-                logger.info("👁️ [APPEAR] Friend doesn't have app, checking...")
-                await checkIfFriendHasApp()
-            }
-
-            if friend.hasApp {
-                logger.info("👁️ [APPEAR] Loading fresh data...")
-                await loadItems(forceRefresh: false)
+        .refreshable {
+            if let ownerPhone = ownerPhone {
+                try? await firebase.syncFriendWishlist(
+                    ownerPhone: ownerPhone,
+                    childId: childId,
+                    forceRefresh: true,
+                    context: modelContext
+                )
             }
         }
-        .sheet(isPresented: $showingShareSheet) {
-            ShareSheet(activityItems: [createInviteMessage()])
+    }
+
+    var body: some View {
+        mainContent
+            .navigationTitle("")
+            .friendNameTitle(displayName)
+            .toolbar { toolbarContent }
+            .task { await onAppearTask() }
+            .sheet(isPresented: $showingShareSheet) { shareSheetContent }
+            .alert("Remove Friend", isPresented: $showingDeleteAlert) { deleteFriendAlert }
+            .alert("Hide Child", isPresented: $showingHideChildAlert) { hideChildAlert }
+            .alert(purchaseAlertTitle, isPresented: $showingPurchaseConfirmation) { purchaseConfirmAlert }
+            .alert("Error", isPresented: .constant(errorMessage != nil)) { errorAlert }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Menu {
+                if childId != nil {
+                    Button(action: {
+                        showingHideChildAlert = true
+                    }) {
+                        Label("Hide Child", systemImage: "eye.slash")
+                            .foregroundColor(.warmGray)
+                    }
+                } else {
+                    Button(action: {
+                        HapticManager.buttonTapped()
+                        showingShareSheet = true
+                    }) {
+                        Label("Invite \(friendFirstName)", systemImage: "paperplane.fill")
+                            .foregroundColor(.warmGray)
+                    }
+
+                    Button(action: {
+                        showingDeleteAlert = true
+                    }) {
+                        Label("Remove Friend", systemImage: "person.fill.xmark")
+                            .foregroundColor(.warmGray)
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 18))
+                    .foregroundColor(.warmGray)
+            }
         }
-        .alert("Remove Friend", isPresented: $showingDeleteAlert) {
+    }
+
+    private func onAppearTask() async {
+        logger.info("👁️ [APPEAR] FriendWishlistView appeared for \(friend.name)")
+        logger.info("👁️ [APPEAR] hasApp: \(friend.hasApp), childId: \(childId ?? "nil")")
+
+        if !friend.hasApp {
+            logger.info("👁️ [APPEAR] Friend doesn't have app, checking...")
+            await checkIfFriendHasApp()
+        }
+
+        if friend.hasApp, let ownerPhone = ownerPhone {
+            logger.info("👁️ [APPEAR] Triggering background sync...")
+            Task {
+                try? await firebase.syncFriendWishlist(
+                    ownerPhone: ownerPhone,
+                    childId: childId,
+                    forceRefresh: false,
+                    context: modelContext
+                )
+            }
+        }
+    }
+
+    private var shareSheetContent: some View {
+        ShareSheet(activityItems: [createInviteMessage()])
+    }
+
+    private var deleteFriendAlert: some View {
+        Group {
             Button("Cancel", role: .cancel) {}
             Button("Remove", role: .destructive) {
                 deleteFriend()
             }
-        } message: {
-            Text("Are you sure you want to remove \(friend.name) from your friends list?")
         }
-        .alert("Hide Child", isPresented: $showingHideChildAlert) {
+    }
+
+    private var hideChildAlert: some View {
+        Group {
             Button("Cancel", role: .cancel) {}
             Button("Hide", role: .destructive) {
                 hideChild()
             }
-        } message: {
-            if let childName = childName {
-                Text("Hide \(childName)? You can unhide them later from the friend's wishlist.")
-            }
         }
-        .alert(itemToPurchase.map { purchases[$0.id] != nil ? "Mark \($0.name) as unpurchased?" : "Mark \($0.name) as purchased?" } ?? "Mark item as purchased?",
-               isPresented: $showingPurchaseConfirmation) {
+    }
+
+    private var purchaseAlertTitle: String {
+        if let item = itemToPurchase {
+            return item.isPurchased
+                ? String(localized: "Mark \(item.name) as unpurchased?")
+                : String(localized: "Mark \(item.name) as purchased?")
+        }
+        return String(localized: "Mark item as purchased?")
+    }
+
+    private var purchaseConfirmAlert: some View {
+        Group {
             Button("Cancel", role: .cancel) {
                 itemToPurchase = nil
             }
-            Button((itemToPurchase.map { purchases[$0.id] != nil } ?? false) ? "Unmark" : "Purchased", role: .none) {
+            Button((itemToPurchase?.isPurchased == true) ? "Unmark" : "Purchased", role: .none) {
                 confirmPurchaseToggle()
                 itemToPurchase = nil
             }
         }
-        .alert("Error", isPresented: .constant(errorMessage != nil)) {
-            Button("OK") {
-                errorMessage = nil
-            }
-        } message: {
-            if let errorMessage = errorMessage {
-                Text(errorMessage)
-            }
+    }
+
+    private var errorAlert: some View {
+        Button("OK") {
+            errorMessage = nil
         }
     }
 
@@ -270,7 +269,7 @@ struct FriendWishlistView: View {
             }) {
                 HStack {
                     Image(systemName: "paperplane.fill")
-                    Text("Or Invite to Install App")
+                    Text("Invite \(friendFirstName)")
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -313,7 +312,7 @@ struct FriendWishlistView: View {
 
         do {
             let hasApp = try await firebase.checkIfFriendHasApp(friendPhone: phone)
-            
+
             if hasApp {
                 logger.info("✅ Found \(friend.name)! They have the app now.")
                 await MainActor.run {
@@ -328,188 +327,138 @@ struct FriendWishlistView: View {
         }
     }
 
-    private func loadItems(forceRefresh: Bool = false) async {
-        logger.info("📦 [LOAD_ITEMS] Loading items for \(friend.name)")
-        
-        guard friend.hasApp else {
-            logger.warning("⚠️ [LOAD_ITEMS] Friend doesn't have app")
-            items = []
-            return
-        }
-
-        isLoading = true
-        defer { isLoading = false }
-
-        do {
-            let itemsWithIds: [(itemId: String, item: FirestoreWishlistItem)]
-            
-            if let childId = childId {
-                // Load items for a specific child
-                itemsWithIds = try await firebase.fetchFriendWishlistItemsWithIds(ownerPhone: nil, childId: childId)
-            } else if let ownerPhone = ownerPhone {
-                // Load items for the friend (user, not a child)
-                itemsWithIds = try await firebase.fetchFriendWishlistItemsWithIds(ownerPhone: ownerPhone)
-            } else {
-                logger.error("❌ [LOAD_ITEMS] No ownerPhone or childId")
-                items = []
-                return
-            }
-
-            logger.info("✅ [LOAD_ITEMS] Fetched \(itemsWithIds.count) items from Firebase")
-
-            // Convert to FriendWishlistItem and load images
-            var loadedItems: [FriendWishlistItem] = []
-            var purchaseDict: [String: FirestorePurchase] = [:]
-            
-            for (itemId, firestoreItem) in itemsWithIds {
-                var item = FriendWishlistItem(from: firestoreItem, itemId: itemId)
-                
-                // Load image if URL exists
-                if let imageUrl = firestoreItem.imageUrl, !imageUrl.isEmpty {
-                    do {
-                        let imageData = try await FirebaseStorageManager.shared.downloadImage(from: imageUrl)
-                        item.imageData = imageData
-                    } catch {
-                        logger.warning("⚠️ Failed to load image for \(item.name): \(error)")
-                    }
-                }
-                
-                loadedItems.append(item)
-                
-                // Load purchases for this item
-                do {
-                    let purchasesWithIds = try await firebase.fetchPurchasesForItemWithIds(itemId: itemId)
-                    // Store the purchase with its ID in the itemId key
-                    // We'll need to store purchaseId separately for deletion, but for now just store the purchase
-                    if let (_, firstPurchase) = purchasesWithIds.first {
-                        purchaseDict[itemId] = firstPurchase
-                    }
-                } catch {
-                    logger.warning("⚠️ Failed to load purchases for \(item.name): \(error)")
-                }
-            }
-
-            await MainActor.run {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    items = loadedItems
-                    purchases = purchaseDict
-                }
-                logger.info("✅ [LOAD_ITEMS] UI updated with \(items.count) items")
-            }
-        } catch {
-            logger.error("❌ [LOAD_ITEMS] Failed to load wishlist: \(error)")
-            errorMessage = "Failed to load wishlist: \(error.localizedDescription)"
-        }
-    }
-
-    private func togglePurchase(_ item: FriendWishlistItem) {
+    private func togglePurchase(_ item: WishlistItem) {
+        logger.info("🔴 [FREEZE-DEBUG] togglePurchase() called for item: \(item.name)")
         itemToPurchase = item
         showingPurchaseConfirmation = true
     }
 
     private func confirmPurchaseToggle() {
+        logger.info("🟣 [FREEZE-DEBUG] confirmPurchaseToggle() called")
         guard let item = itemToPurchase else { return }
         HapticManager.buttonTapped()
 
         Task {
             do {
-                let wasPurchased = purchases[item.id] != nil
+                let itemId = item.id.uuidString
+                let wasPurchased = item.isPurchased
 
                 if wasPurchased {
-                    // Unpurchase: Delete the purchase record
                     guard let userPhone = FirebaseAuthManager.shared.currentUserPhone else {
                         throw FirebaseError.notAuthenticated
                     }
-                    
-                    // Find the purchase made by current user
-                    let purchasesWithIds = try await firebase.fetchPurchasesForItemWithIds(itemId: item.id)
-                    if let (purchaseId, purchase) = purchasesWithIds.first(where: { $0.purchase.purchaserPhone == userPhone }) {
-                        // Delete the purchase
-                        try await firebase.deletePurchase(purchaseId: purchaseId, itemId: item.id)
-                        
+
+                    let purchasesWithIds = try await firebase.fetchPurchasesForItemWithIds(itemId: itemId)
+                    if let (purchaseId, _) = purchasesWithIds.first(where: {
+                        PhoneNumber.matches($0.purchase.purchaserPhone, userPhone)
+                    }) {
+                        try await firebase.deletePurchase(purchaseId: purchaseId, itemId: itemId)
                         await MainActor.run {
-                            purchases.removeValue(forKey: item.id)
+                            item.isPurchased = false
+                            try? modelContext.save()
                             HapticManager.impact(.medium)
                         }
-                        
                         logger.info("✅ Unmarked item as purchased")
                     }
                 } else {
-                    // Purchase: Create a new purchase record
                     guard let ownerPhone = ownerPhone else { return }
-                    
-                    let purchaseId = try await firebase.savePurchase(
-                        itemId: item.id,
+
+                    _ = try await firebase.savePurchase(
+                        itemId: itemId,
                         itemName: item.name,
                         ownerPhone: ownerPhone
                     )
 
-                    // Fetch the purchase back to store in dict
-                    let purchaseRecords = try await firebase.fetchPurchasesForItem(itemId: item.id)
-                    if let firstPurchase = purchaseRecords.first {
-                        await MainActor.run {
-                            purchases[item.id] = firstPurchase
-                            HapticManager.itemMarkedPurchased()
-                            purchasedItemIdForSparkle = item.id
-                        }
+                    await MainActor.run {
+                        item.isPurchased = true
+                        try? modelContext.save()
+                        HapticManager.itemMarkedPurchased()
+                        purchasedItemIdForSparkle = itemId
                     }
+
+                    ReviewManager.shared.markFirstPurchase()
 
                     logger.info("✅ Marked item as purchased")
                 }
             } catch {
-                errorMessage = "Failed to update item: \(error.localizedDescription)"
+                errorMessage = String(localized: "Failed to update item: \(error.localizedDescription)")
                 HapticManager.errorOccurred()
                 logger.error("❌ Failed to toggle purchase: \(error)")
             }
         }
     }
 
+    /// Only the App Store link goes out. A `christmaswishlist://` add-friend link
+    /// is not tappable in Messages, and the friend edge we already created is
+    /// enough for their list to appear here once they sign in with this number.
     private func createInviteMessage() -> String {
-        return """
-        I have a wishlist here if you are interested. I would like to see yours as well. Get the list here:
+        String(localized: """
+        I have a wishlist here if you are interested. I would like to see yours as well.
 
-        https://apps.apple.com/app/id6755366177
-        """
+        Get the app: https://apps.apple.com/app/id6755366177
+        """)
     }
 
     private func deleteFriend() {
         modelContext.delete(friend)
         try? modelContext.save()
         HapticManager.itemDeleted()
+
+        if let firebaseId = friend.firebaseFriendshipId {
+            Task {
+                do {
+                    try await firebase.deleteFriend(friendId: firebaseId)
+                    logger.info("✅ [DELETE_FRIEND] Deleted friend from Firebase: \(friend.name)")
+                } catch {
+                    logger.error("❌ [DELETE_FRIEND] Failed to delete from Firebase: \(error)")
+                }
+            }
+        }
+
         dismiss()
     }
 
     private func hideChild() {
         guard let childId = childId else { return }
 
-        friend.hiddenChildRecordIDs.append(childId)
+        if !friend.hiddenChildRecordIDs.contains(childId) {
+            friend.hiddenChildRecordIDs.append(childId)
+        }
         try? modelContext.save()
+
+        if let friendshipId = friend.firebaseFriendshipId {
+            Task {
+                try? await firebase.updateFriendHiddenChildren(
+                    friendshipId: friendshipId,
+                    hiddenChildren: friend.hiddenChildRecordIDs
+                )
+            }
+        }
 
         HapticManager.buttonTapped()
         dismiss()
     }
     
-    private func computeGiftIndex(for item: FriendWishlistItem, in allItems: [FriendWishlistItem], purchases: [String: FirestorePurchase]) -> Int? {
-        guard purchases[item.id] != nil else { return nil }
-        
+    private func computeGiftIndex(for item: WishlistItem, in allItems: [WishlistItem]) -> Int? {
+        guard item.isPurchased else { return nil }
+
         let purchasedItems = allItems
-            .filter { purchases[$0.id] != nil }
+            .filter(\.isPurchased)
             .sorted { $0.createdAt < $1.createdAt }
-        
-        if let index = purchasedItems.firstIndex(where: { $0.id == item.id }) {
-            return index
-        }
-        return nil
+
+        return purchasedItems.firstIndex(where: { $0.id == item.id })
     }
 }
 
 // MARK: - Friend Item Detail View
 
 struct FriendItemDetailView: View {
-    let item: FriendWishlistItem
-    let isPurchased: Bool
-    let onTogglePurchase: () -> Void
+    let item: WishlistItem
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @ObservedObject private var firebase = FirebaseManager.shared
+    @State private var isPurchased: Bool = false
+    @State private var isLoading: Bool = false
 
     var body: some View {
         ZStack {
@@ -535,22 +484,6 @@ struct FriendItemDetailView: View {
                         .foregroundColor(.warmBlack)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
-
-                    // Purchase status badge
-                    if isPurchased {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.successGreen)
-                            Text("Checked off")
-                                .font(.bodyMedium)
-                                .fontWeight(.medium)
-                                .foregroundColor(.successGreen)
-                        }
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.vertical, Spacing.sm)
-                        .background(Color.successGreen.opacity(0.1))
-                        .cornerRadius(CornerRadius.sm)
-                    }
 
                     // Description
                     if let description = item.itemDescription, !description.isEmpty {
@@ -587,12 +520,26 @@ struct FriendItemDetailView: View {
 
                     // Purchase toggle button
                     Button(action: {
-                        HapticManager.buttonTapped()
-                        onTogglePurchase()
-                        dismiss()
+                        Task {
+                            await togglePurchase()
+                        }
                     }) {
-                        if isPurchased {
-                            Text("Unpurchase")
+                        if isLoading {
+                            HStack {
+                                ProgressView()
+                                    .tint(.white)
+                                Text("Loading...")
+                            }
+                            .font(.bodyLarge)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, Spacing.lg)
+                            .padding(.vertical, Spacing.md)
+                            .background(Color.forestGreen.opacity(0.6))
+                            .cornerRadius(CornerRadius.md)
+                        } else if isPurchased {
+                            Text("Unpurchase Item")
                                 .font(.bodyLarge)
                                 .fontWeight(.medium)
                                 .foregroundColor(.warmGray)
@@ -628,34 +575,87 @@ struct FriendItemDetailView: View {
                         }
                     }
                     .padding(.top, Spacing.md)
+                    .disabled(isLoading)
                 }
                 .padding(Spacing.lg)
             }
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await loadPurchaseStatus()
+        }
+    }
+
+    private func loadPurchaseStatus() async {
+        await MainActor.run {
+            isPurchased = item.isPurchased
+        }
+    }
+
+    private func togglePurchase() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        do {
+            let itemId = item.id.uuidString
+
+            if isPurchased {
+                guard let userPhone = FirebaseAuthManager.shared.currentUserPhone else { return }
+                let purchasesWithIds = try await firebase.fetchPurchasesForItemWithIds(itemId: itemId)
+                if let (purchaseId, _) = purchasesWithIds.first(where: {
+                    PhoneNumber.matches($0.purchase.purchaserPhone, userPhone)
+                }) {
+                    try await firebase.deletePurchase(purchaseId: purchaseId, itemId: itemId)
+                    await MainActor.run {
+                        item.isPurchased = false
+                        isPurchased = false
+                        try? modelContext.save()
+                        HapticManager.impact(.medium)
+                    }
+                }
+            } else {
+                guard !item.ownerPhone.isEmpty else { return }
+                _ = try await firebase.savePurchase(
+                    itemId: itemId,
+                    itemName: item.name,
+                    ownerPhone: item.ownerPhone
+                )
+                await MainActor.run {
+                    item.isPurchased = true
+                    isPurchased = true
+                    try? modelContext.save()
+                    HapticManager.itemMarkedPurchased()
+                }
+
+                ReviewManager.shared.markFirstPurchase()
+            }
+        } catch {
+            print("Failed to toggle purchase: \(error)")
+            HapticManager.errorOccurred()
+        }
     }
 }
 
 // MARK: - Friend Wishlist Item Row
 
 struct FriendWishlistItemRow: View {
-    let item: FriendWishlistItem
+    let item: WishlistItem
     let isPurchased: Bool
     let giftIndex: Int?
     let showSparkle: Bool
     let onSparkleComplete: () -> Void
-    @AppStorage("showPurchasedItems") private var showPurchasedItems = true
 
     var body: some View {
         HStack(spacing: Spacing.md) {
             // Photo on the left (or spacer to maintain alignment)
-            if item.imageData != nil || (showPurchasedItems && isPurchased) {
+            // For friends' wishlists: ALWAYS show gift when purchased (ignore showPurchasedItems setting)
+            if item.imageData != nil || isPurchased {
                 ZStack(alignment: .center) {
                     WishlistItemPhoto(
                         imageData: item.imageData,
-                        isPurchased: showPurchasedItems && isPurchased,
-                        itemId: item.id,
+                        isPurchased: isPurchased,
+                        itemId: item.id.uuidString,
                         giftIndex: giftIndex
                     )
                     

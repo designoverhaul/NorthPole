@@ -3,6 +3,14 @@
 *.xcworkspace
 xcuserdata/
 DerivedData/
+build/
+
+# Stale editor/tool leftovers
+*.backup
+*.backup[0-9]
+*.bak
+*.orig
+*.log
 
 # API Keys and Secrets
 Config.swift

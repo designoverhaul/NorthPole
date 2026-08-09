@@ -11,6 +11,7 @@
 		937DDDC22EE9B8960036CD5F /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 937DDDC12EE9B8960036CD5F /* FirebaseFirestore */; };
 		937DDDC42EE9B8960036CD5F /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 937DDDC32EE9B8960036CD5F /* FirebaseMessaging */; };
 		937DDDC62EE9B8960036CD5F /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 937DDDC52EE9B8960036CD5F /* FirebaseStorage */; };
+		93FA00032EF0A0010036CD5F /* SuperwallKit in Frameworks */ = {isa = PBXBuildFile; productRef = 93FA00022EF0A0010036CD5F /* SuperwallKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,6 +35,7 @@
 		9341EFD82ECA1A2800E98CEC /* ChristmasWishlist.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChristmasWishlist.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		9341EFE52ECA1A2A00E98CEC /* ChristmasWishlistTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChristmasWishlistTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		9341EFEF2ECA1A2A00E98CEC /* ChristmasWishlistUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChristmasWishlistUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		937DEA112EEC5FD80036CD5F /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -76,6 +78,7 @@
 				937DDDC62EE9B8960036CD5F /* FirebaseStorage in Frameworks */,
 				937DDDC02EE9B8960036CD5F /* FirebaseAuth in Frameworks */,
 				937DDDC22EE9B8960036CD5F /* FirebaseFirestore in Frameworks */,
+				93FA00032EF0A0010036CD5F /* SuperwallKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -99,6 +102,7 @@
 		9341EFCF2ECA1A2800E98CEC = {
 			isa = PBXGroup;
 			children = (
+				937DEA112EEC5FD80036CD5F /* Secrets.xcconfig */,
 				9341EFDA2ECA1A2800E98CEC /* ChristmasWishlist */,
 				9341EFE82ECA1A2A00E98CEC /* ChristmasWishlistTests */,
 				9341EFF22ECA1A2A00E98CEC /* ChristmasWishlistUITests */,
@@ -140,6 +144,7 @@
 				937DDDC12EE9B8960036CD5F /* FirebaseFirestore */,
 				937DDDC32EE9B8960036CD5F /* FirebaseMessaging */,
 				937DDDC52EE9B8960036CD5F /* FirebaseStorage */,
+				93FA00022EF0A0010036CD5F /* SuperwallKit */,
 			);
 			productName = ChristmasWishlist;
 			productReference = 9341EFD82ECA1A2800E98CEC /* ChristmasWishlist.app */;
@@ -220,11 +225,18 @@
 			knownRegions = (
 				en,
 				Base,
+				de,
+				es,
+				fr,
+				it,
+				ja,
+				"pt-BR",
 			);
 			mainGroup = 9341EFCF2ECA1A2800E98CEC;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				937DDDBE2EE9B8960036CD5F /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				93FA00012EF0A0010036CD5F /* XCRemoteSwiftPackageReference "Superwall-iOS" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 9341EFD92ECA1A2800E98CEC /* Products */;
@@ -423,6 +435,7 @@
 		};
 		9341EFFA2ECA1A2A00E98CEC /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 937DEA112EEC5FD80036CD5F /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -445,7 +458,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 11;
+				MARKETING_VERSION = 16;
 				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlist;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -460,6 +473,7 @@
 		};
 		9341EFFB2ECA1A2A00E98CEC /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 937DEA112EEC5FD80036CD5F /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -482,7 +496,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 11;
+				MARKETING_VERSION = 16;
 				PRODUCT_BUNDLE_IDENTIFIER = com.designoverhaul.ChristmasWishlist;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -633,6 +647,14 @@
 				minimumVersion = 12.6.0;
 			};
 		};
+		93FA00012EF0A0010036CD5F /* XCRemoteSwiftPackageReference "Superwall-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/superwall/Superwall-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 4.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -655,6 +677,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 937DDDBE2EE9B8960036CD5F /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseStorage;
+		};
+		93FA00022EF0A0010036CD5F /* SuperwallKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 93FA00012EF0A0010036CD5F /* XCRemoteSwiftPackageReference "Superwall-iOS" */;
+			productName = SuperwallKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

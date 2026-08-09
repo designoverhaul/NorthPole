@@ -82,7 +82,7 @@ struct FriendsListView: View {
                         },
                         icon: "plus"
                     )
-                    .sparkle(isActive: true)
+                    .sparkle()
                     .padding(Spacing.lg)
                 }
             }
@@ -155,8 +155,8 @@ struct FriendsListView: View {
     private func handleAppear() {
         checkContactPermission()
 
-        // Load friends from Firebase on appear
-        if !hasLoadedOnce && firebase.isAuthenticated {
+        // Load friends from Firebase on appear (refresh every time, not just once)
+        if firebase.isAuthenticated {
             Task {
                 await loadFriendsFromFirebase()
                 await refreshFriendDiscoveryStatus() // Check if any friends have installed the app
@@ -283,28 +283,20 @@ struct FriendsListView: View {
     }
 
     private func addFriend(from contact: CNContact) {
-        // Get primary phone/email for display/saving
         let phoneNumber = contact.phoneNumbers.first?.value.stringValue
         let email = contact.emailAddresses.first?.value as String?
-
         let name = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
 
-        guard let phone = phoneNumber, !phone.isEmpty else {
-            // Skip contacts without phone numbers
-            return
-        }
+        guard let phone = phoneNumber, !phone.isEmpty else { return }
 
-        // Check if this friend already exists locally
-        let normalizedPhone = phone.filter { $0.isNumber }
+        let normalizedPhone = PhoneNumber.normalize(phone)
         let isDuplicate = friends.contains { friend in
-            if let friendPhone = friend.phoneNumber {
-                return friendPhone == normalizedPhone
-            }
-            return false
+            guard let friendPhone = friend.phoneNumber else { return false }
+            return PhoneNumber.matches(friendPhone, normalizedPhone)
         }
 
         if isDuplicate {
-            errorMessage = "\(name) is already in your friends list"
+            errorMessage = String(localized: "\(name) is already in your friends list")
             showingError = true
             HapticManager.errorOccurred()
             return
@@ -312,65 +304,28 @@ struct FriendsListView: View {
 
         HapticManager.itemAdded()
 
-        // Get contact's photo if available
         var imageData: Data?
         if contact.imageDataAvailable {
             imageData = contact.imageData
         }
 
         Task {
-            // Check if friend has the app
-            var hasApp = false
             do {
-                hasApp = try await firebase.checkIfFriendHasApp(friendPhone: normalizedPhone)
-                if hasApp {
-                    logger.info("✅ Discovered friend has app!")
-                } else {
-                    logger.info("ℹ️ Friend hasn't installed the app yet")
-                }
-            } catch {
-                logger.error("⚠️ Error checking if friend has app: \(error)")
-            }
-
-            // STEP 1: Save to Firebase FIRST (source of truth)
-            do {
-                let friendId = try await firebase.saveFriend(
-                    friendPhone: normalizedPhone,
-                    friendName: name
+                let friend = try await firebase.addFriend(
+                    name: name,
+                    phone: normalizedPhone,
+                    email: email,
+                    imageData: imageData,
+                    context: modelContext
                 )
-                logger.info("✅ [ADD_FRIEND] Saved friend to Firebase: \(name)")
-
-                // STEP 2: Then cache locally for fast display
-                await MainActor.run {
-                    let newFriend = Friend(
-                        name: name,
-                        phoneNumber: normalizedPhone,
-                        email: email,
-                        hasApp: hasApp,
-                        cloudKitRecordID: friendId, // Using as Firebase document ID
-                        imageData: imageData
-                    )
-
-                    logger.info("💾 [ADD_FRIEND] Caching friend locally: \(name), hasApp: \(hasApp)")
-
-                    modelContext.insert(newFriend)
-
-                    do {
-                        try modelContext.save()
-                        logger.info("✅ [ADD_FRIEND] Successfully cached friend: \(name)")
-                        
-                        // Refresh data to get item counts and children (if friend has app)
-                        if hasApp {
-                            Task { await loadFriendData() }
-                        }
-                    } catch {
-                        logger.error("❌ [ADD_FRIEND] Failed to cache friend: \(error)")
-                    }
+                logger.info("✅ [ADD_FRIEND] Saved friend: \(friend.name), hasApp: \(friend.hasApp)")
+                if friend.hasApp {
+                    await loadFriendData()
                 }
             } catch {
-                logger.error("❌ [ADD_FRIEND] Failed to save friend to Firebase: \(error)")
+                logger.error("❌ [ADD_FRIEND] Failed: \(error)")
                 await MainActor.run {
-                    errorMessage = "Failed to save friend: \(error.localizedDescription)"
+                    errorMessage = String(localized: "Failed to save friend: \(error.localizedDescription)")
                     showingError = true
                     HapticManager.errorOccurred()
                 }

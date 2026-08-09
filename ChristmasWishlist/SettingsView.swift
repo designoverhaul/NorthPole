@@ -9,17 +9,23 @@ import SwiftUI
 import SwiftData
 
 struct SettingsView: View {
+    @Environment(\.modelContext) private var modelContext
     @ObservedObject private var firebase = FirebaseManager.shared
-    @AppStorage("notificationsEnabled") private var notificationsEnabled = true
-    @AppStorage("showPurchasedItems") private var showPurchasedItems = true
+    @ObservedObject private var superwall = SuperwallManager.shared
+    @AppStorage("notificationsEnabled") private var notificationsEnabled = false
+    @AppStorage("showPurchasedItems") private var showPurchasedItems = false
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
+    /// Mirrors the stored settings so a switch the paywall denied can animate back off.
+    @State private var showPurchasedToggle = false
+    @State private var notificationsToggle = false
     @State private var showingPermissionAlert = false
     @State private var showingErrorAlert = false
     @State private var errorAlertMessage = ""
     @State private var showingSuccessAlert = false
     @State private var successAlertMessage = ""
-    @State private var showingOnboarding = false
     @State private var showingDeleteAccountFirstConfirm = false
     @State private var showingDeleteAccountFinalConfirm = false
+    @State private var isDeletingAccount = false
 
     var isActive: Bool = true
 
@@ -38,91 +44,94 @@ struct SettingsView: View {
                         NavigationLink {
                             ManageChildrenView()
                         } label: {
-                            HStack {
-                                Image(systemName: "figure.2.and.child.holdinghands")
-                                    .foregroundColor(.forestGreen)
-                                Text("Manage Children")
-                                    .foregroundColor(.warmBlack)
-                            }
+                            SettingsRow(
+                                icon: "figure.and.child.holdinghands",
+                                title: "Manage Children",
+                                subtitle: "Kids without a phone"
+                            )
                         }
                         .listRowBackground(Color.creamCard)
                     } header: {
-                        Text("Profile")
-                            .foregroundColor(.forestGreen)
+                        SettingsSectionHeader("Profile")
                     } footer: {
-                        Text("Your children's wish lists will be available when friends connect to you.")
-                            .foregroundColor(.warmGray)
-                            .font(.caption)
+                        SettingsSectionFooter("Add kids who don't have their own phone. Their wish lists will be available when friends connect to you.")
                     }
 
                     Section {
-                        Toggle("Show purchased status", isOn: $showPurchasedItems)
-                            .tint(.forestGreen)
-                            .foregroundColor(.warmBlack)
+                        if superwall.isSubscribed {
+                            SettingsRow(
+                                icon: "checkmark.seal.fill",
+                                iconColor: .gold,
+                                title: "Unlimited gifts",
+                                subtitle: "Thanks for supporting North Pole"
+                            )
                             .listRowBackground(Color.creamCard)
-                    } header: {
-                        Text("Secrecy")
-                            .foregroundColor(.forestGreen)
-                    } footer: {
-                        Text("If on you'll know when your wish list items are purchased")
-                            .foregroundColor(.warmGray)
-                            .font(.caption)
-                    }
-
-                    Section {
-                        Toggle("Purchase notifications", isOn: $notificationsEnabled)
-                            .tint(.forestGreen)
-                            .foregroundColor(.warmBlack)
-                            .listRowBackground(Color.creamCard)
-                            .onChange(of: notificationsEnabled) { oldValue, newValue in
-                                // Always check/request permissions when toggled
-                                requestNotificationPermissions(userToggledOn: newValue)
+                        } else {
+                            Button {
+                                HapticManager.buttonTapped()
+                                superwall.presentUpgrade()
+                            } label: {
+                                SettingsRow(
+                                    icon: "sparkles",
+                                    iconColor: .gold,
+                                    title: "Unlock unlimited gifts",
+                                    subtitle: "Every list is capped at \(SuperwallManager.freeGiftsPerPerson) gifts for now",
+                                    accessory: .chevron
+                                )
                             }
-                    } footer: {
-                        Text("Get notified when someone purchases from your wishlist")
-                            .foregroundColor(.warmGray)
-                            .font(.caption)
+                            .listRowBackground(Color.creamCard)
+                        }
+                    } header: {
+                        SettingsSectionHeader("Membership")
                     }
 
                     Section {
-                        Button(action: {
+                        Toggle(isOn: $showPurchasedToggle) {
+                            SettingsRow(icon: "eye", title: "Show purchased status")
+                        }
+                        .tint(.forestGreen)
+                        .listRowBackground(Color.creamCard)
+                        .onChange(of: showPurchasedToggle) { _, newValue in
+                            setShowPurchasedItems(newValue)
+                        }
+
+                        Toggle(isOn: $notificationsToggle) {
+                            SettingsRow(icon: "bell.fill", title: "Purchase notifications")
+                        }
+                        .tint(.forestGreen)
+                        .listRowBackground(Color.creamCard)
+                        .onChange(of: notificationsToggle) { _, newValue in
+                            setNotificationsEnabled(newValue)
+                        }
+                    } header: {
+                        SettingsSectionHeader("Secrecy")
+                    } footer: {
+                        SettingsSectionFooter(
+                            "If on, you'll see when your wishlist items have been purchased.",
+                            "Get notified when someone purchases from your wishlist."
+                        )
+                    }
+
+                    Section {
+                        Button {
                             HapticManager.buttonTapped()
                             rateApp()
-                        }) {
-                            HStack {
-                                Image(systemName: "star.fill")
-                                    .foregroundColor(.gold)
-                                Text("Rate App")
-                                    .foregroundColor(.warmBlack)
-                                Spacer()
-                            }
+                        } label: {
+                            SettingsRow(icon: "star.fill", iconColor: .gold, title: "Rate App")
                         }
                         .listRowBackground(Color.creamCard)
 
                         Button(action: sendBugReport) {
-                            HStack {
-                                Image(systemName: "ladybug.fill")
-                                    .foregroundColor(.forestGreen)
-                                Text("Report a Bug")
-                                    .foregroundColor(.warmBlack)
-                                Spacer()
-                            }
+                            SettingsRow(icon: "ladybug.fill", title: "Report a Bug")
                         }
                         .listRowBackground(Color.creamCard)
 
                         Button(action: requestFeature) {
-                            HStack {
-                                Image(systemName: "lightbulb.fill")
-                                    .foregroundColor(.gold)
-                                Text("Wish for new app feature")
-                                    .foregroundColor(.warmBlack)
-                                Spacer()
-                            }
+                            SettingsRow(icon: "lightbulb.fill", iconColor: .gold, title: "Wish for new app feature")
                         }
                         .listRowBackground(Color.creamCard)
                     } header: {
-                        Text("Support")
-                            .foregroundColor(.forestGreen)
+                        SettingsSectionHeader("Support")
                     }
 
                     // MARK: - Account
@@ -131,73 +140,79 @@ struct SettingsView: View {
                             HapticManager.buttonTapped()
                             showingDeleteAccountFirstConfirm = true
                         } label: {
-                            HStack {
-                                Image(systemName: "person.fill.xmark")
-                                    .foregroundColor(.forestGreen)
-                                Text("Delete My Account")
-                                    .foregroundColor(.warmBlack)
-                                Spacer()
-                            }
+                            SettingsRow(icon: "person.fill.xmark", title: "Delete My Account")
                         }
                         .disabled(!firebase.isAuthenticated)
                         .listRowBackground(Color.creamCard)
                     } header: {
-                        Text("Account")
-                            .foregroundColor(.forestGreen)
+                        SettingsSectionHeader("Account")
                     }
 
-                    #if DEBUG
-                    Section {
-                        NavigationLink {
-                            CloudKitDebugView()
-                        } label: {
-                            HStack {
-                                Image(systemName: "ladybug.fill")
-                                    .foregroundColor(.forestGreen)
-                                Text("CloudKit Debug")
-                                    .foregroundColor(.warmBlack)
+                    // Shown for Xcode / development installs only — not App Store or TestFlight.
+                    // Do not gate this on `#if DEBUG`: Run was historically Release on device, which
+                    // compiled the whole section out of every phone install.
+                    if DeveloperTools.isAvailable {
+                        Section {
+                            // Reads the live status so a real purchase (or the paywall) moves it too.
+                            Toggle(isOn: Binding(
+                                get: { superwall.isSubscribed },
+                                set: { superwall.setDebugSubscribed($0) }
+                            )) {
+                                SettingsRow(
+                                    icon: "crown.fill",
+                                    iconColor: .gold,
+                                    verbatim: "Force Subscriber Status"
+                                )
                             }
+                            .tint(.forestGreen)
+                            .listRowBackground(Color.creamCard)
+
+                            Button(action: restartOnboarding) {
+                                SettingsRow(icon: "arrow.counterclockwise", verbatim: "Restart Onboarding")
+                            }
+                            .listRowBackground(Color.creamCard)
+
+                            Button(action: cleanLocalDatabase) {
+                                SettingsRow(icon: "trash", iconColor: .warmGray, verbatim: "Reset Local Cache")
+                            }
+                            .listRowBackground(Color.creamCard)
+
+                            NavigationLink {
+                                ImportLogsView()
+                            } label: {
+                                SettingsRow(icon: "doc.text.magnifyingglass", verbatim: "Import Logs")
+                            }
+                            .listRowBackground(Color.creamCard)
+                        } header: {
+                            SettingsSectionHeader(verbatim: "Developer Tools")
                         }
-                        .listRowBackground(Color.creamCard)
-                    } header: {
-                        Text("Developer Tools")
-                            .foregroundColor(.forestGreen)
                     }
-                    #endif
 
                     Section {
                         Link(destination: URL(string: "https://designoverhaul.com/privacy-policy-north-pole/")!) {
-                            HStack {
-                                Image(systemName: "hand.raised.fill")
-                                    .foregroundColor(.forestGreen)
-                                Text("Privacy Policy")
-                                    .foregroundColor(.warmBlack)
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                                    .font(.caption)
-                                    .foregroundColor(.warmGray)
-                            }
+                            SettingsRow(
+                                icon: "hand.raised.fill",
+                                title: "Privacy Policy",
+                                accessory: .externalLink
+                            )
                         }
                         .listRowBackground(Color.creamCard)
                     } header: {
-                        Text("Legal")
-                        .foregroundColor(.forestGreen)
+                        SettingsSectionHeader("Legal")
                     }
 
                     // App Version Footer
                     Section {
-                        HStack {
-                            Spacer()
-                            VStack(spacing: 4) {
-                                Text("North Pole v\(appVersion)")
-                                    .font(.caption)
-                                    .foregroundColor(.warmGray)
-                                Text("Made with ❄️ for the holidays")
-                                    .font(.caption)
-                                    .foregroundColor(.warmGrayLight)
-                            }
-                            Spacer()
+                        VStack(spacing: Spacing.xs) {
+                            Text("North Pole v\(appVersion)")
+                                .font(.caption)
+                                .foregroundColor(.warmGray)
+                            Text("Made with ❄️ in Atlanta")
+                                .font(.caption)
+                                .foregroundColor(.warmGrayLight)
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, Spacing.sm)
                         .listRowBackground(Color.clear)
                     }
                 }
@@ -205,6 +220,16 @@ struct SettingsView: View {
             }
             .navigationTitle("")
             .goldTitle("Settings")
+            .onAppear {
+                showPurchasedToggle = showPurchasedItems
+                notificationsToggle = notificationsEnabled
+            }
+            .onChange(of: showPurchasedItems) { _, newValue in
+                showPurchasedToggle = newValue
+            }
+            .onChange(of: notificationsEnabled) { _, newValue in
+                notificationsToggle = newValue
+            }
             .alert("Notifications Disabled", isPresented: $showingPermissionAlert) {
                 Button("Open Settings", role: .none) {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -234,7 +259,7 @@ struct SettingsView: View {
                     showingDeleteAccountFinalConfirm = true
                 }
             } message: {
-                Text("This will delete all of your wishlists, children, purchases, and friends from iCloud for this app on your iCloud account. This cannot be undone.")
+                Text("This will permanently delete your wishlists, children, purchases, friends, and account from North Pole. This cannot be undone.")
             }
             .alert("Delete My Account Data", isPresented: $showingDeleteAccountFinalConfirm) {
                 Button("Cancel", role: .cancel) { }
@@ -244,48 +269,83 @@ struct SettingsView: View {
                     }
                 }
             } message: {
-                Text("Are you sure? This action will permanently remove your data for this app from iCloud on this account. Other users’ data will not be affected.")
-            }
-            .fullScreenCover(isPresented: $showingOnboarding) {
-                OnboardingView(isCompleted: $showingOnboarding)
+                Text("Are you sure? This permanently removes your North Pole data. Other users’ data will not be affected.")
             }
         }
     }
 
     // MARK: - Functions
 
-    private func requestNotificationPermissions(userToggledOn: Bool) {
-        Task {
-            // First check current status
+    /// Both spoiler settings only turn on if the paywall lets them, so the switch is driven
+    /// through Superwall and mirrors the stored value again once it has decided.
+    private func setShowPurchasedItems(_ isOn: Bool) {
+        guard isOn != showPurchasedItems else { return }
+
+        guard isOn else {
+            showPurchasedItems = false
+            return
+        }
+
+        superwall.requestRevealPurchases(feature: .showPurchasedStatus) {
+            showPurchasedItems = true
+        } didResolve: {
+            showPurchasedToggle = showPurchasedItems
+        }
+    }
+
+    private func setNotificationsEnabled(_ isOn: Bool) {
+        guard isOn != notificationsEnabled else { return }
+
+        guard isOn else {
+            notificationsEnabled = false
+            syncNotificationSetting()
+            return
+        }
+
+        superwall.requestRevealPurchases(feature: .purchaseNotifications) {
+            notificationsEnabled = true
+            requestNotificationPermissions()
+        } didResolve: {
+            notificationsToggle = notificationsEnabled
+        }
+    }
+
+    /// Makes sure iOS will actually deliver notifications, turning the setting back off if not.
+    private func requestNotificationPermissions() {
+        Task { @MainActor in
             let status = await NotificationManager.shared.checkAuthorizationStatus()
 
-            if status == .notDetermined {
-                // Never asked before - request now
+            switch status {
+            case .notDetermined:
                 print("📱 [SETTINGS] Requesting notification permissions for first time...")
                 let granted = await NotificationManager.shared.requestAuthorization()
-
-                await MainActor.run {
-                    if !granted {
-                        // User denied - turn toggle back off
-                        notificationsEnabled = false
-                        showingPermissionAlert = true
-                    } else {
-                        print("✅ [SETTINGS] User granted notification permissions")
-                    }
-                }
-            } else if status == .denied {
-                // User previously denied - need to go to Settings
-                print("⚠️ [SETTINGS] Notifications denied - need to enable in iOS Settings")
-                await MainActor.run {
+                if granted {
+                    print("✅ [SETTINGS] User granted notification permissions")
+                } else {
                     notificationsEnabled = false
                     showingPermissionAlert = true
                 }
-            } else if status == .authorized {
-                // Already authorized - just update the preference
+            case .denied:
+                print("⚠️ [SETTINGS] Notifications denied - need to enable in iOS Settings")
+                notificationsEnabled = false
+                showingPermissionAlert = true
+            default:
                 print("✅ [SETTINGS] Notifications already authorized")
-                await MainActor.run {
-                    notificationsEnabled = userToggledOn
-                }
+            }
+
+            syncNotificationSetting()
+        }
+    }
+
+    /// Mirrors the preference to Firestore so Cloud Functions know whether to push.
+    private func syncNotificationSetting() {
+        let enabled = notificationsEnabled
+        Task {
+            do {
+                try await FirebaseManager.shared.updateNotificationSetting(enabled)
+                print("✅ [SETTINGS] Notification preference synced to Firestore: \(enabled)")
+            } catch {
+                print("⚠️ [SETTINGS] Failed to sync notification preference: \(error.localizedDescription)")
             }
         }
     }
@@ -299,8 +359,8 @@ struct SettingsView: View {
 
     private func sendBugReport() {
         let email = "contact@designoverhaul.com"
-        let subject = "North Pole - Bug Report"
-        let body = """
+        let subject = String(localized: "North Pole - Bug Report")
+        let body = String(localized: """
         Please describe the bug you encountered:
 
 
@@ -309,7 +369,7 @@ struct SettingsView: View {
         App Version: \(appVersion)
         Device: \(UIDevice.current.model)
         iOS Version: \(UIDevice.current.systemVersion)
-        """
+        """)
 
         if let url = URL(string: "mailto:\(email)?subject=\(subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&body=\(body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
             UIApplication.shared.open(url)
@@ -318,8 +378,8 @@ struct SettingsView: View {
 
     private func requestFeature() {
         let email = "contact@designoverhaul.com"
-        let subject = "North Pole - Feature Request"
-        let body = """
+        let subject = String(localized: "North Pole - Feature Request")
+        let body = String(localized: """
         Hi,
 
         This is a user-driven product and we value your feedback! What feature would you like to see?
@@ -330,7 +390,7 @@ struct SettingsView: View {
         App Version: \(appVersion)
         Device: \(UIDevice.current.model)
         iOS Version: \(UIDevice.current.systemVersion)
-        """
+        """)
 
         if let url = URL(string: "mailto:\(email)?subject=\(subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")&body=\(body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
             UIApplication.shared.open(url)
@@ -361,6 +421,14 @@ struct SettingsView: View {
                 showingSuccessAlert = true
             }
         }
+    }
+
+    /// Sends the app back to the onboarding flow. `RootView` observes the same
+    /// `hasCompletedOnboarding` key, so clearing it swaps the root view out.
+    private func restartOnboarding() {
+        HapticManager.buttonTapped()
+        print("🎄 [SETTINGS] Restarting onboarding")
+        hasCompletedOnboarding = false
     }
 
     private func cleanLocalDatabase() {
@@ -401,7 +469,7 @@ struct SettingsView: View {
                 UserDefaults.standard.set(false, forKey: "hasRunCloudKitMigration_v1")
                 print("✅ [CLEAN] Reset migration flag")
 
-                successAlertMessage = "Local database cleaned! Deleted \(items.count) items, \(children.count) children, and \(friends.count) friends.\n\nRestart the app to re-download from CloudKit."
+                successAlertMessage = "Local cache cleaned. Restart the app to re-download from Firebase."
                 showingSuccessAlert = true
 
                 HapticManager.notification(.success)
@@ -425,28 +493,176 @@ struct SettingsView: View {
 
         guard firebase.isAuthenticated else {
             await MainActor.run {
-                errorAlertMessage = "Not signed in to Firebase. Please sign in before deleting your account data."
+                errorAlertMessage = String(localized: "Not signed in. Please sign in before deleting your account.")
                 showingErrorAlert = true
             }
             return
         }
 
+        await MainActor.run { isDeletingAccount = true }
+
         do {
-            // TODO: Implement Firebase account deletion
-            // This should delete all user data from Firestore
+            try await firebase.deleteAllAccountData(context: modelContext)
             await MainActor.run {
-                errorAlertMessage = "Account deletion not yet implemented with Firebase"
-                showingErrorAlert = true
+                isDeletingAccount = false
+                hasCompletedOnboarding = false
+                successAlertMessage = String(localized: "Your account and data were deleted.")
+                showingSuccessAlert = true
+                HapticManager.notification(.success)
             }
         } catch {
             await MainActor.run {
-                errorAlertMessage = "Failed to delete account data: \(error.localizedDescription)"
+                isDeletingAccount = false
+                errorAlertMessage = String(localized: "Failed to delete account data: \(error.localizedDescription)")
                 showingErrorAlert = true
                 HapticManager.errorOccurred()
             }
         }
     }
 
+}
+
+// MARK: - Settings Building Blocks
+
+/// A single Settings row. Owns the icon size, the fixed icon column and the
+/// label typography so every row's text starts on the same vertical line no
+/// matter how wide its SF Symbol is.
+/// Gates developer-only UI. Xcode installs keep `embedded.mobileprovision`; App Store and
+/// TestFlight strip it, so ordinary users never see these controls — even in a Release binary.
+enum DeveloperTools {
+    static var isAvailable: Bool {
+        #if targetEnvironment(simulator)
+        true
+        #else
+        Bundle.main.path(forResource: "embedded", ofType: "mobileprovision") != nil
+        #endif
+    }
+}
+
+private struct SettingsRow: View {
+    enum Accessory {
+        case chevron
+        case externalLink
+
+        var symbol: String {
+            switch self {
+            case .chevron: return "chevron.right"
+            case .externalLink: return "arrow.up.right"
+            }
+        }
+    }
+
+    private let icon: String
+    private let iconColor: Color
+    private let title: Text
+    private let subtitle: Text?
+    private let accessory: Accessory?
+
+    /// Width of the icon column. Sized for the widest symbol used here
+    /// (`figure.and.child.holdinghands`) so nothing crowds the label.
+    private let iconColumnWidth: CGFloat = 26
+
+    init(
+        icon: String,
+        iconColor: Color = .forestGreen,
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey? = nil,
+        accessory: Accessory? = nil
+    ) {
+        self.icon = icon
+        self.iconColor = iconColor
+        self.title = Text(title)
+        self.subtitle = subtitle.map { Text($0) }
+        self.accessory = accessory
+    }
+
+    /// For strings that must stay out of the string catalog (DEBUG-only rows).
+    init(
+        icon: String,
+        iconColor: Color = .forestGreen,
+        verbatim title: String,
+        accessory: Accessory? = nil
+    ) {
+        self.icon = icon
+        self.iconColor = iconColor
+        self.title = Text(verbatim: title)
+        self.subtitle = nil
+        self.accessory = accessory
+    }
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(iconColor)
+                .frame(width: iconColumnWidth)
+
+            VStack(alignment: .leading, spacing: 2) {
+                title
+                    .font(.bodyMedium)
+                    .foregroundColor(.warmBlack)
+
+                if let subtitle {
+                    subtitle
+                        .font(.caption)
+                        .foregroundColor(.warmGray)
+                }
+            }
+
+            Spacer(minLength: Spacing.sm)
+
+            if let accessory {
+                Image(systemName: accessory.symbol)
+                    .font(.caption)
+                    .foregroundColor(.warmGray)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// Section header. The top padding is what separates one group from the next —
+/// `listSectionSpacing` can only shrink the system default, not grow it.
+private struct SettingsSectionHeader: View {
+    private let title: Text
+
+    init(_ title: LocalizedStringKey) {
+        self.title = Text(title)
+    }
+
+    init(verbatim title: String) {
+        self.title = Text(verbatim: title)
+    }
+
+    var body: some View {
+        title
+            .font(.headingSmall)
+            .foregroundColor(.forestGreen)
+            .textCase(nil)
+            .padding(.top, Spacing.md)
+            .padding(.bottom, Spacing.xs)
+    }
+}
+
+private struct SettingsSectionFooter: View {
+    /// Each key renders as its own paragraph, so a section explaining several
+    /// controls stays translatable one sentence at a time.
+    private let paragraphs: [LocalizedStringKey]
+
+    init(_ paragraphs: LocalizedStringKey...) {
+        self.paragraphs = paragraphs
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                Text(paragraph)
+            }
+        }
+        .font(.caption)
+        .foregroundColor(.warmGray)
+        .padding(.top, Spacing.xs)
+    }
 }
 
 // Helper extension for batching arrays
